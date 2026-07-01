@@ -166,7 +166,7 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 	markerCtx, markerCancel := context.WithTimeout(ctx, skipMarkerPutTimeout)
 	defer markerCancel()
 	markerStart := time.Now()
-	err := w.store.PutObject(markerCtx, w.cfg.OptimizedBucket, key, body, storage.PutOptions{
+	err = w.store.PutObject(markerCtx, w.cfg.OptimizedBucket, key, body, storage.PutOptions{
 		ContentType: "application/json",
 		Metadata: map[string]string{
 			sourceETagMetadata: source.ETag,
