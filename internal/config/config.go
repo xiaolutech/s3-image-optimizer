@@ -26,6 +26,7 @@ type Config struct {
 
 	ScanInterval time.Duration
 	RunOnce      bool
+	ProcessDelay time.Duration
 }
 
 func DefaultConfig() *Config {
@@ -38,6 +39,7 @@ func DefaultConfig() *Config {
 		JPEGQuality:         82,
 		MinBytes:            512 * 1024,
 		ScanInterval:        24 * time.Hour,
+		ProcessDelay:        0,
 	}
 }
 
@@ -66,6 +68,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.ScanInterval, err = getenvDuration("SCAN_INTERVAL", cfg.ScanInterval); err != nil {
+		return nil, err
+	}
+	if cfg.ProcessDelay, err = getenvDuration("PROCESS_DELAY", cfg.ProcessDelay); err != nil {
 		return nil, err
 	}
 	if cfg.RunOnce, err = getenvBool("RUN_ONCE", cfg.RunOnce); err != nil {
@@ -110,6 +115,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ScanInterval <= 0 {
 		return fmt.Errorf("SCAN_INTERVAL must be positive")
+	}
+	if c.ProcessDelay < 0 {
+		return fmt.Errorf("PROCESS_DELAY cannot be negative")
 	}
 	return nil
 }

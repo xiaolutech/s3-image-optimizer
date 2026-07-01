@@ -58,6 +58,7 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 - `JPEG_QUALITY` - JPEG output quality, 1 through 100. Default: `82`.
 - `MIN_BYTES` - Minimum source object size before optimization. Default: `524288`.
 - `SCAN_INTERVAL` - Interval for continuous scanning. Default: `24h`.
+- `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
 - `RUN_ONCE` - Run one scan and exit. Default: `false`.
 
 ## Local Development

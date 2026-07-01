@@ -37,6 +37,7 @@ type Config struct {
 	MaxWidth            int
 	JPEGQuality         int
 	MinBytes            int64
+	ProcessDelay        time.Duration
 }
 
 type Worker struct {
@@ -62,23 +63,17 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 }
 
 func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) error {
-	objStart := time.Now()
-	log.Printf("process object start key=%s size=%d content_type=%s", source.Key, source.Size, source.ContentType)
-
 	if source.Size < w.cfg.MinBytes {
 		log.Printf("skip small object key=%s size=%d", source.Key, source.Size)
 		return nil
 	}
 
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
 	headCtx, headCancel := context.WithTimeout(ctx, headObjectTimeout)
 	defer headCancel()
-	headStart := time.Now()
 	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, source.Key)
-	if err != nil {
-		log.Printf("head optimized key=%s duration=%s err=%v", source.Key, time.Since(headStart), err)
-	} else {
-		log.Printf("head optimized key=%s duration=%s etag=%q found=true", source.Key, time.Since(headStart), optimized.ETag)
-	}
 	if err != nil && !isNotFound(err) {
 		return fmt.Errorf("head optimized object %s: %w", source.Key, err)
 	}
@@ -87,15 +82,12 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 		return nil
 	}
 
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
 	getCtx, getCancel := context.WithTimeout(ctx, getObjectTimeout)
 	defer getCancel()
-	getStart := time.Now()
 	body, sourceInfo, err := w.store.GetObject(getCtx, w.cfg.SourceBucket, source.Key)
-	if err != nil {
-		log.Printf("get source key=%s duration=%s err=%v", source.Key, time.Since(getStart), err)
-	} else {
-		log.Printf("get source key=%s duration=%s size=%d", source.Key, time.Since(getStart), len(body))
-	}
 	if err != nil {
 		return fmt.Errorf("get source object %s: %w", source.Key, err)
 	}
@@ -109,25 +101,18 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 		JPEGQuality: w.cfg.JPEGQuality,
 		MinSavings:  0.05,
 	})
-	log.Printf(
-		"optimize done key=%s duration=%s skipped=%t reason=%s out_bytes=%d",
-		source.Key,
-		time.Since(optimizeStart),
-		result.Skipped,
-		result.Reason,
-		len(result.Body),
-	)
 	if err != nil {
 		return fmt.Errorf("optimize %s: %w", source.Key, err)
 	}
 	if result.Skipped {
-		log.Printf("skipping object key=%s due to %s", source.Key, result.Reason)
 		return w.writeSkipMarker(ctx, source, result.Reason)
 	}
 
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
 	putCtx, putCancel := context.WithTimeout(ctx, putObjectTimeout)
 	defer putCancel()
-	putStart := time.Now()
 	if err := w.store.PutObject(putCtx, w.cfg.OptimizedBucket, source.Key, result.Body, storage.PutOptions{
 		ContentType: result.ContentType,
 		Metadata: map[string]string{
@@ -135,12 +120,26 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 			profileMetadata:    w.cfg.OptimizationProfile,
 		},
 	}); err != nil {
-		log.Printf("put optimized key=%s duration=%s err=%v", source.Key, time.Since(putStart), err)
 		return fmt.Errorf("put optimized object %s: %w", source.Key, err)
 	}
-	log.Printf("put optimized key=%s duration=%s", source.Key, time.Since(putStart))
-	log.Printf("process object complete key=%s total_duration=%s source_etag=%s", source.Key, time.Since(objStart), source.ETag)
+	log.Printf("optimized object key=%s source_etag=%s", source.Key, source.ETag)
 	return nil
+}
+
+func (w *Worker) waitForRequestDelay(ctx context.Context) error {
+	if w.cfg.ProcessDelay <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(w.cfg.ProcessDelay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func isCurrentOptimized(optimized *storage.ObjectInfo, source storage.ObjectInfo, profile string) bool {
@@ -163,9 +162,11 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 		return fmt.Errorf("marshal skip marker: %w", err)
 	}
 	key := skipMarkerKey(source.Key)
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
 	markerCtx, markerCancel := context.WithTimeout(ctx, skipMarkerPutTimeout)
 	defer markerCancel()
-	markerStart := time.Now()
 	err = w.store.PutObject(markerCtx, w.cfg.OptimizedBucket, key, body, storage.PutOptions{
 		ContentType: "application/json",
 		Metadata: map[string]string{
@@ -174,10 +175,8 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 		},
 	})
 	if err != nil {
-		log.Printf("put skip marker key=%s duration=%s err=%v", key, time.Since(markerStart), err)
 		return fmt.Errorf("put skip marker %s: %w", key, err)
 	}
-	log.Printf("put skip marker key=%s duration=%s", key, time.Since(markerStart))
 	log.Printf("wrote skip marker key=%s reason=%s", source.Key, reason)
 	return nil
 }

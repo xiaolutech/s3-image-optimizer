@@ -40,6 +40,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ScanInterval != 24*time.Hour {
 		t.Fatalf("expected scan interval 24h, got %v", cfg.ScanInterval)
 	}
+	if cfg.ProcessDelay != 0 {
+		t.Fatalf("expected process delay 0, got %v", cfg.ProcessDelay)
+	}
 	if cfg.RunOnce {
 		t.Fatal("expected RunOnce false by default")
 	}
@@ -60,6 +63,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("JPEG_QUALITY", "76")
 	t.Setenv("MIN_BYTES", "262144")
 	t.Setenv("SCAN_INTERVAL", "5m")
+	t.Setenv("PROCESS_DELAY", "5s")
 	t.Setenv("RUN_ONCE", "true")
 
 	cfg, err := Load()
@@ -87,6 +91,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.ScanInterval != 5*time.Minute {
 		t.Fatalf("expected scan interval 5m, got %v", cfg.ScanInterval)
+	}
+	if cfg.ProcessDelay != 5*time.Second {
+		t.Fatalf("expected process delay 5s, got %v", cfg.ProcessDelay)
 	}
 	if !cfg.RunOnce {
 		t.Fatal("expected RunOnce true")
@@ -183,6 +190,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid jpeg quality", key: "JPEG_QUALITY", val: "high"},
 		{name: "invalid min bytes", key: "MIN_BYTES", val: "many"},
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
+		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
 		{name: "invalid run once", key: "RUN_ONCE", val: "sometimes"},
 	}
 
@@ -238,6 +246,7 @@ func clearEnv(t *testing.T) {
 		"JPEG_QUALITY",
 		"MIN_BYTES",
 		"SCAN_INTERVAL",
+		"PROCESS_DELAY",
 		"RUN_ONCE",
 	} {
 		if err := os.Unsetenv(key); err != nil {

@@ -40,6 +40,7 @@ func main() {
 		MaxWidth:            cfg.MaxWidth,
 		JPEGQuality:         cfg.JPEGQuality,
 		MinBytes:            cfg.MinBytes,
+		ProcessDelay:        cfg.ProcessDelay,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
