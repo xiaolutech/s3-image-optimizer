@@ -95,7 +95,6 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 		source = *sourceInfo
 	}
 
-	optimizeStart := time.Now()
 	result, err := imageopt.Optimize(body, source.ContentType, imageopt.Options{
 		MaxWidth:    w.cfg.MaxWidth,
 		JPEGQuality: w.cfg.JPEGQuality,
