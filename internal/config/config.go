@@ -29,7 +29,7 @@ type Config struct {
 }
 
 func DefaultConfig() *Config {
-	return &Config{
+		return &Config{
 		Port:                "8080",
 		S3Region:            "us-east-1",
 		S3UseSSL:            true,
@@ -37,7 +37,7 @@ func DefaultConfig() *Config {
 		MaxWidth:            0,
 		JPEGQuality:         82,
 		MinBytes:            512 * 1024,
-		ScanInterval:        10 * time.Minute,
+		ScanInterval:        24 * time.Hour,
 	}
 }
 

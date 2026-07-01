@@ -37,8 +37,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MinBytes != 512*1024 {
 		t.Fatalf("expected min bytes 524288, got %d", cfg.MinBytes)
 	}
-	if cfg.ScanInterval != 10*time.Minute {
-		t.Fatalf("expected scan interval 10m, got %v", cfg.ScanInterval)
+	if cfg.ScanInterval != 24*time.Hour {
+		t.Fatalf("expected scan interval 24h, got %v", cfg.ScanInterval)
 	}
 	if cfg.RunOnce {
 		t.Fatal("expected RunOnce false by default")

@@ -44,7 +44,7 @@ services:
       MAX_WIDTH: "0"
       JPEG_QUALITY: "82"
       MIN_BYTES: "524288"
-      SCAN_INTERVAL: 10m
+      SCAN_INTERVAL: 24h
       RUN_ONCE: "false"
     ports:
       - "8080:8080"
