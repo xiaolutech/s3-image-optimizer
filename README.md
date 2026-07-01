@@ -32,7 +32,8 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 
 ## Behavior
 
-- Scans `SOURCE_BUCKET`.
+- Waits for on-demand optimization triggers by default.
+- Scans `SOURCE_BUCKET` only when `SCAN_ENABLED=true` or `RUN_ONCE=true`.
 - Supports JPEG and PNG.
 - Keeps original image dimensions by default.
 - Resizes images wider than `MAX_WIDTH` only when `MAX_WIDTH` is greater than `0`.
@@ -42,6 +43,28 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 - Skips objects smaller than `MIN_BYTES`.
 - Skips current optimized objects when metadata already matches.
 - Writes skip markers to `.s3-image-optimizer/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
+
+## On-Demand Optimization
+
+Use this path when `s3-static` serves a source object because the optimized copy is missing or stale. The request returns immediately after the object key is queued; optimization runs in the background with one worker, so first access is not blocked by image processing.
+
+```bash
+curl -X POST 'http://s3-image-optimizer:8080/optimize?key=notes/photo.jpg'
+```
+
+Equivalent JSON body:
+
+```bash
+curl -X POST 'http://s3-image-optimizer:8080/optimize' \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"notes/photo.jpg"}'
+```
+
+Responses:
+
+- `202 {"status":"queued","key":"notes/photo.jpg"}` - accepted for background optimization.
+- `202 {"status":"already_queued","key":"notes/photo.jpg"}` - this key is already queued or processing.
+- `429 {"error":"trigger queue is full"}` - worker is saturated; caller should retry later.
 
 ## Configuration
 
@@ -57,9 +80,14 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 - `MAX_WIDTH` - Maximum output image width. Set to `0` to preserve original dimensions. Default: `0`.
 - `JPEG_QUALITY` - JPEG output quality, 1 through 100. Default: `82`.
 - `MIN_BYTES` - Minimum source object size before optimization. Default: `524288`.
-- `SCAN_INTERVAL` - Interval for continuous scanning. Default: `24h`.
+- `SCAN_ENABLED` - Enable continuous full-bucket scanning. Default: `false`.
+- `SCAN_INTERVAL` - Interval for continuous scanning when `SCAN_ENABLED=true`. Default: `24h`.
 - `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
-- `RUN_ONCE` - Run one scan and exit. Default: `false`.
+- `TRIGGER_QUEUE_SIZE` - Maximum on-demand keys queued or processing at once. Default: `256`.
+- `SCAN_RETRY_ATTEMPTS` - Whole-scan retry attempts after a failed scan, including the first attempt. Set to `1` to disable scan retries. Default: `8`.
+- `SCAN_RETRY_INITIAL_DELAY` - Initial whole-scan retry delay. Default: `5s`.
+- `SCAN_RETRY_MAX_DELAY` - Maximum whole-scan retry delay after exponential backoff. Default: `2m`.
+- `RUN_ONCE` - Run one full-bucket scan and exit. Default: `false`.
 
 ## Local Development
 

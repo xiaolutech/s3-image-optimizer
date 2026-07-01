@@ -34,19 +34,23 @@ func main() {
 	}
 
 	w := worker.New(store, worker.Config{
-		SourceBucket:        cfg.SourceBucket,
-		OptimizedBucket:     cfg.OptimizedBucket,
-		OptimizationProfile: cfg.OptimizationProfile,
-		MaxWidth:            cfg.MaxWidth,
-		JPEGQuality:         cfg.JPEGQuality,
-		MinBytes:            cfg.MinBytes,
-		ProcessDelay:        cfg.ProcessDelay,
+		SourceBucket:          cfg.SourceBucket,
+		OptimizedBucket:       cfg.OptimizedBucket,
+		OptimizationProfile:   cfg.OptimizationProfile,
+		MaxWidth:              cfg.MaxWidth,
+		JPEGQuality:           cfg.JPEGQuality,
+		MinBytes:              cfg.MinBytes,
+		ProcessDelay:          cfg.ProcessDelay,
+		ScanRetryAttempts:     cfg.ScanRetryAttempts,
+		ScanRetryInitialDelay: cfg.ScanRetryInitialDelay,
+		ScanRetryMaxDelay:     cfg.ScanRetryMaxDelay,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server := startHealthServer(cfg.Port)
+	triggers := startTriggerQueue(ctx, w, cfg.TriggerQueueSize)
+	server := startHealthServer(cfg.Port, triggers)
 	defer shutdownHealthServer(server)
 
 	if cfg.RunOnce {
@@ -56,10 +60,17 @@ func main() {
 		return
 	}
 
-	runLoop(ctx, w, cfg.ScanInterval)
+	if cfg.ScanEnabled {
+		runLoop(ctx, w, cfg.ScanInterval)
+		return
+	}
+
+	log.Printf("scan loop disabled; waiting for on-demand optimize triggers")
+	<-ctx.Done()
+	log.Printf("shutdown requested")
 }
 
-func startHealthServer(port string) *http.Server {
+func startHealthServer(port string, triggers *triggerQueue) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -70,10 +81,14 @@ func startHealthServer(port string) *http.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"healthy"}`))
 	})
+	mux.HandleFunc("/optimize", optimizeHandler(triggers))
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%s", port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%s", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 	go func() {
 		log.Printf("health server listening on %s", server.Addr)
