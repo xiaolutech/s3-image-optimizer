@@ -41,7 +41,7 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 - Writes optimized objects to `OPTIMIZED_BUCKET` using the same key.
 - Skips objects smaller than `MIN_BYTES`.
 - Skips current optimized objects when metadata already matches.
-- Writes skip markers to `.s3-image-optimizer/skips/<escaped-source-key>.json` for unsupported images or insufficient savings.
+- Writes skip markers to `.s3-image-optimizer/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
 
 ## Configuration
 

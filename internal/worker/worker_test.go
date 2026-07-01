@@ -161,7 +161,7 @@ func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", ".s3-image-optimizer/skips/notes%2Fanim.gif.json")].body)
+	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
 	if marker.SourceKey != source.Key {
 		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
 	}
@@ -186,7 +186,7 @@ func TestWorkerWritesSkipMarkerForInsufficientSavings(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", ".s3-image-optimizer/skips/notes%2Ftiny.jpg.json")].body)
+	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
 	if marker.Reason != "insufficient_savings" {
 		t.Fatalf("expected insufficient_savings, got %q", marker.Reason)
 	}

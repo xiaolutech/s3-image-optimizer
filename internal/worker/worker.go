@@ -2,11 +2,12 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/url"
 	"time"
 
 	"github.com/xiaolutech/s3-image-optimizer/internal/imageopt"
@@ -181,7 +182,8 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 }
 
 func skipMarkerKey(sourceKey string) string {
-	return ".s3-image-optimizer/skips/" + url.PathEscape(sourceKey) + ".json"
+	sum := sha256.Sum256([]byte(sourceKey))
+	return ".s3-image-optimizer/skips/" + hex.EncodeToString(sum[:]) + ".json"
 }
 
 type notFoundError interface {
