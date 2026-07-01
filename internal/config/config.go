@@ -24,22 +24,33 @@ type Config struct {
 	JPEGQuality         int
 	MinBytes            int64
 
-	ScanInterval time.Duration
-	RunOnce      bool
-	ProcessDelay time.Duration
+	ScanInterval     time.Duration
+	ScanEnabled      bool
+	RunOnce          bool
+	ProcessDelay     time.Duration
+	TriggerQueueSize int
+
+	ScanRetryAttempts     int
+	ScanRetryInitialDelay time.Duration
+	ScanRetryMaxDelay     time.Duration
 }
 
 func DefaultConfig() *Config {
-		return &Config{
-		Port:                "8080",
-		S3Region:            "us-east-1",
-		S3UseSSL:            true,
-		OptimizationProfile: "v2-jpeg82-png-best-original-width",
-		MaxWidth:            0,
-		JPEGQuality:         82,
-		MinBytes:            512 * 1024,
-		ScanInterval:        24 * time.Hour,
-		ProcessDelay:        0,
+	return &Config{
+		Port:                  "8080",
+		S3Region:              "us-east-1",
+		S3UseSSL:              true,
+		OptimizationProfile:   "v2-jpeg82-png-best-original-width",
+		MaxWidth:              0,
+		JPEGQuality:           82,
+		MinBytes:              512 * 1024,
+		ScanInterval:          24 * time.Hour,
+		ScanEnabled:           false,
+		ProcessDelay:          0,
+		TriggerQueueSize:      256,
+		ScanRetryAttempts:     8,
+		ScanRetryInitialDelay: 5 * time.Second,
+		ScanRetryMaxDelay:     2 * time.Minute,
 	}
 }
 
@@ -70,7 +81,22 @@ func Load() (*Config, error) {
 	if cfg.ScanInterval, err = getenvDuration("SCAN_INTERVAL", cfg.ScanInterval); err != nil {
 		return nil, err
 	}
+	if cfg.ScanEnabled, err = getenvBool("SCAN_ENABLED", cfg.ScanEnabled); err != nil {
+		return nil, err
+	}
 	if cfg.ProcessDelay, err = getenvDuration("PROCESS_DELAY", cfg.ProcessDelay); err != nil {
+		return nil, err
+	}
+	if cfg.TriggerQueueSize, err = getenvInt("TRIGGER_QUEUE_SIZE", cfg.TriggerQueueSize); err != nil {
+		return nil, err
+	}
+	if cfg.ScanRetryAttempts, err = getenvInt("SCAN_RETRY_ATTEMPTS", cfg.ScanRetryAttempts); err != nil {
+		return nil, err
+	}
+	if cfg.ScanRetryInitialDelay, err = getenvDuration("SCAN_RETRY_INITIAL_DELAY", cfg.ScanRetryInitialDelay); err != nil {
+		return nil, err
+	}
+	if cfg.ScanRetryMaxDelay, err = getenvDuration("SCAN_RETRY_MAX_DELAY", cfg.ScanRetryMaxDelay); err != nil {
 		return nil, err
 	}
 	if cfg.RunOnce, err = getenvBool("RUN_ONCE", cfg.RunOnce); err != nil {
@@ -118,6 +144,21 @@ func (c *Config) Validate() error {
 	}
 	if c.ProcessDelay < 0 {
 		return fmt.Errorf("PROCESS_DELAY cannot be negative")
+	}
+	if c.TriggerQueueSize < 1 {
+		return fmt.Errorf("TRIGGER_QUEUE_SIZE must be at least 1")
+	}
+	if c.ScanRetryAttempts < 1 {
+		return fmt.Errorf("SCAN_RETRY_ATTEMPTS must be at least 1")
+	}
+	if c.ScanRetryInitialDelay < 0 {
+		return fmt.Errorf("SCAN_RETRY_INITIAL_DELAY cannot be negative")
+	}
+	if c.ScanRetryMaxDelay < 0 {
+		return fmt.Errorf("SCAN_RETRY_MAX_DELAY cannot be negative")
+	}
+	if c.ScanRetryMaxDelay > 0 && c.ScanRetryInitialDelay > c.ScanRetryMaxDelay {
+		return fmt.Errorf("SCAN_RETRY_INITIAL_DELAY cannot exceed SCAN_RETRY_MAX_DELAY")
 	}
 	return nil
 }

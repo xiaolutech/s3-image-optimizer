@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
 )
@@ -271,23 +273,100 @@ func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	}
 }
 
+func TestWorkerProcessKeyHeadsSourceWithoutListingBucket(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
+
+	w := New(store, testWorkerConfig())
+	if err := w.ProcessKey(context.Background(), "photo.jpg"); err != nil {
+		t.Fatalf("ProcessKey failed: %v", err)
+	}
+
+	if store.listCalls != 0 {
+		t.Fatalf("expected no list calls, got %d", store.listCalls)
+	}
+	if _, ok := store.objects[objKey("optimized", "photo.jpg")]; !ok {
+		t.Fatal("expected photo.jpg optimized object")
+	}
+}
+
+func TestWorkerRunOnceRetriesTransientListErrors(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
+	store.listErrorsRemaining = 2
+	store.listErr = errors.New("connect: connection refused")
+
+	cfg := testWorkerConfig()
+	cfg.ScanRetryAttempts = 3
+	cfg.ScanRetryInitialDelay = time.Nanosecond
+	cfg.ScanRetryMaxDelay = time.Nanosecond
+
+	w := New(store, cfg)
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce failed after transient list errors: %v", err)
+	}
+
+	if store.listCalls != 3 {
+		t.Fatalf("expected 3 list attempts, got %d", store.listCalls)
+	}
+	if _, ok := store.objects[objKey("optimized", "photo.jpg")]; !ok {
+		t.Fatal("expected photo.jpg optimized object")
+	}
+}
+
+func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
+	store.headErrors[objKey("optimized", "photo.jpg")] = errors.New("optimized head failed")
+
+	cfg := testWorkerConfig()
+	cfg.ScanRetryAttempts = 3
+	cfg.ScanRetryInitialDelay = time.Nanosecond
+	cfg.ScanRetryMaxDelay = time.Nanosecond
+
+	w := New(store, cfg)
+	err := w.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected RunOnce to return process object error")
+	}
+	if !strings.Contains(err.Error(), "optimized head failed") {
+		t.Fatalf("expected optimized head error, got %v", err)
+	}
+	if store.listCalls != 1 {
+		t.Fatalf("expected no retry for process object error, got %d list calls", store.listCalls)
+	}
+}
+
 type fakeObject struct {
 	info storage.ObjectInfo
 	body []byte
 }
 
 type fakeStore struct {
-	objects    map[string]fakeObject
-	getCalls   int
-	putKeys    []string
-	listBucket string
+	objects             map[string]fakeObject
+	getCalls            int
+	listCalls           int
+	putKeys             []string
+	listBucket          string
+	listErrorsRemaining int
+	listErr             error
+	headErrors          map[string]error
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{objects: make(map[string]fakeObject)}
+	return &fakeStore{
+		objects:    make(map[string]fakeObject),
+		headErrors: make(map[string]error),
+	}
 }
 
 func (s *fakeStore) HeadObject(ctx context.Context, bucket, key string) (*storage.ObjectInfo, error) {
+	if err, ok := s.headErrors[objKey(bucket, key)]; ok {
+		return nil, err
+	}
 	obj, ok := s.objects[objKey(bucket, key)]
 	if !ok {
 		return nil, errNotFound{}
@@ -322,7 +401,12 @@ func (s *fakeStore) PutObject(ctx context.Context, bucket, key string, body []by
 }
 
 func (s *fakeStore) ListObjects(ctx context.Context, bucket, prefix string, visit func(storage.ObjectInfo) error) error {
+	s.listCalls++
 	s.listBucket = bucket
+	if s.listErrorsRemaining > 0 {
+		s.listErrorsRemaining--
+		return s.listErr
+	}
 	var keys []string
 	for fullKey, obj := range s.objects {
 		if !strings.HasPrefix(fullKey, bucket+"/") {

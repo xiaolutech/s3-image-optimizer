@@ -32,13 +32,16 @@ type Store interface {
 }
 
 type Config struct {
-	SourceBucket        string
-	OptimizedBucket     string
-	OptimizationProfile string
-	MaxWidth            int
-	JPEGQuality         int
-	MinBytes            int64
-	ProcessDelay        time.Duration
+	SourceBucket          string
+	OptimizedBucket       string
+	OptimizationProfile   string
+	MaxWidth              int
+	JPEGQuality           int
+	MinBytes              int64
+	ProcessDelay          time.Duration
+	ScanRetryAttempts     int
+	ScanRetryInitialDelay time.Duration
+	ScanRetryMaxDelay     time.Duration
 }
 
 type Worker struct {
@@ -58,9 +61,71 @@ func New(store Store, cfg Config) *Worker {
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
+	attempts := w.cfg.ScanRetryAttempts
+	if attempts <= 0 {
+		attempts = 1
+	}
+	delay := w.cfg.ScanRetryInitialDelay
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err := w.runOnce(ctx)
+		if err == nil {
+			return nil
+		}
+		var processErr processObjectError
+		if errors.As(err, &processErr) {
+			return processErr.err
+		}
+		if attempt == attempts {
+			return err
+		}
+
+		log.Printf("scan attempt failed attempt=%d/%d retry_in=%s err=%v", attempt, attempts, delay, err)
+		if err := wait(ctx, delay); err != nil {
+			return err
+		}
+		delay = w.nextRetryDelay(delay)
+	}
+	return nil
+}
+
+func (w *Worker) runOnce(ctx context.Context) error {
+	var processErr error
 	return w.store.ListObjects(ctx, w.cfg.SourceBucket, "", func(info storage.ObjectInfo) error {
-		return w.ProcessObject(ctx, info)
+		processErr = w.ProcessObject(ctx, info)
+		if processErr != nil {
+			return processObjectError{err: processErr}
+		}
+		return nil
 	})
+}
+
+type processObjectError struct {
+	err error
+}
+
+func (e processObjectError) Error() string {
+	return e.err.Error()
+}
+
+func (e processObjectError) Unwrap() error {
+	return e.err
+}
+
+func (w *Worker) ProcessKey(ctx context.Context, key string) error {
+	if key == "" {
+		return fmt.Errorf("source key is required")
+	}
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
+	sourceCtx, sourceCancel := context.WithTimeout(ctx, headObjectTimeout)
+	defer sourceCancel()
+	source, err := w.store.HeadObject(sourceCtx, w.cfg.SourceBucket, key)
+	if err != nil {
+		return fmt.Errorf("head source object %s: %w", key, err)
+	}
+	return w.ProcessObject(ctx, *source)
 }
 
 func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) error {
@@ -157,11 +222,34 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 }
 
 func (w *Worker) waitForRequestDelay(ctx context.Context) error {
-	if w.cfg.ProcessDelay <= 0 {
-		return nil
+	return wait(ctx, w.cfg.ProcessDelay)
+}
+
+func (w *Worker) nextRetryDelay(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	next := delay * 2
+	if next < delay {
+		next = delay
+	}
+	if w.cfg.ScanRetryMaxDelay > 0 && next > w.cfg.ScanRetryMaxDelay {
+		return w.cfg.ScanRetryMaxDelay
+	}
+	return next
+}
+
+func wait(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
 	}
 
-	timer := time.NewTimer(w.cfg.ProcessDelay)
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {

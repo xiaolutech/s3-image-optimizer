@@ -40,8 +40,23 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ScanInterval != 24*time.Hour {
 		t.Fatalf("expected scan interval 24h, got %v", cfg.ScanInterval)
 	}
+	if cfg.ScanEnabled {
+		t.Fatal("expected scan enabled false by default")
+	}
 	if cfg.ProcessDelay != 0 {
 		t.Fatalf("expected process delay 0, got %v", cfg.ProcessDelay)
+	}
+	if cfg.TriggerQueueSize != 256 {
+		t.Fatalf("expected trigger queue size 256, got %d", cfg.TriggerQueueSize)
+	}
+	if cfg.ScanRetryAttempts != 8 {
+		t.Fatalf("expected scan retry attempts 8, got %d", cfg.ScanRetryAttempts)
+	}
+	if cfg.ScanRetryInitialDelay != 5*time.Second {
+		t.Fatalf("expected scan retry initial delay 5s, got %v", cfg.ScanRetryInitialDelay)
+	}
+	if cfg.ScanRetryMaxDelay != 2*time.Minute {
+		t.Fatalf("expected scan retry max delay 2m, got %v", cfg.ScanRetryMaxDelay)
 	}
 	if cfg.RunOnce {
 		t.Fatal("expected RunOnce false by default")
@@ -63,7 +78,12 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("JPEG_QUALITY", "76")
 	t.Setenv("MIN_BYTES", "262144")
 	t.Setenv("SCAN_INTERVAL", "5m")
+	t.Setenv("SCAN_ENABLED", "true")
 	t.Setenv("PROCESS_DELAY", "5s")
+	t.Setenv("TRIGGER_QUEUE_SIZE", "32")
+	t.Setenv("SCAN_RETRY_ATTEMPTS", "4")
+	t.Setenv("SCAN_RETRY_INITIAL_DELAY", "2s")
+	t.Setenv("SCAN_RETRY_MAX_DELAY", "30s")
 	t.Setenv("RUN_ONCE", "true")
 
 	cfg, err := Load()
@@ -92,8 +112,23 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.ScanInterval != 5*time.Minute {
 		t.Fatalf("expected scan interval 5m, got %v", cfg.ScanInterval)
 	}
+	if !cfg.ScanEnabled {
+		t.Fatal("expected scan enabled true")
+	}
 	if cfg.ProcessDelay != 5*time.Second {
 		t.Fatalf("expected process delay 5s, got %v", cfg.ProcessDelay)
+	}
+	if cfg.TriggerQueueSize != 32 {
+		t.Fatalf("expected trigger queue size 32, got %d", cfg.TriggerQueueSize)
+	}
+	if cfg.ScanRetryAttempts != 4 {
+		t.Fatalf("expected scan retry attempts 4, got %d", cfg.ScanRetryAttempts)
+	}
+	if cfg.ScanRetryInitialDelay != 2*time.Second {
+		t.Fatalf("expected scan retry initial delay 2s, got %v", cfg.ScanRetryInitialDelay)
+	}
+	if cfg.ScanRetryMaxDelay != 30*time.Second {
+		t.Fatalf("expected scan retry max delay 30s, got %v", cfg.ScanRetryMaxDelay)
 	}
 	if !cfg.RunOnce {
 		t.Fatal("expected RunOnce true")
@@ -161,6 +196,31 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			mutate:    func(cfg *Config) { cfg.ScanInterval = 0 },
 			wantError: "SCAN_INTERVAL",
 		},
+		{
+			name:      "invalid retry attempts",
+			mutate:    func(cfg *Config) { cfg.ScanRetryAttempts = 0 },
+			wantError: "SCAN_RETRY_ATTEMPTS",
+		},
+		{
+			name:      "invalid trigger queue size",
+			mutate:    func(cfg *Config) { cfg.TriggerQueueSize = 0 },
+			wantError: "TRIGGER_QUEUE_SIZE",
+		},
+		{
+			name:      "negative retry initial delay",
+			mutate:    func(cfg *Config) { cfg.ScanRetryInitialDelay = -1 },
+			wantError: "SCAN_RETRY_INITIAL_DELAY",
+		},
+		{
+			name:      "negative retry max delay",
+			mutate:    func(cfg *Config) { cfg.ScanRetryMaxDelay = -1 },
+			wantError: "SCAN_RETRY_MAX_DELAY",
+		},
+		{
+			name:      "retry initial delay exceeds max delay",
+			mutate:    func(cfg *Config) { cfg.ScanRetryInitialDelay = time.Minute; cfg.ScanRetryMaxDelay = time.Second },
+			wantError: "SCAN_RETRY_INITIAL_DELAY",
+		},
 	}
 
 	for _, tt := range tests {
@@ -190,7 +250,12 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid jpeg quality", key: "JPEG_QUALITY", val: "high"},
 		{name: "invalid min bytes", key: "MIN_BYTES", val: "many"},
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
+		{name: "invalid scan enabled", key: "SCAN_ENABLED", val: "sometimes"},
 		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
+		{name: "invalid trigger queue size", key: "TRIGGER_QUEUE_SIZE", val: "many"},
+		{name: "invalid retry attempts", key: "SCAN_RETRY_ATTEMPTS", val: "many"},
+		{name: "invalid retry initial delay", key: "SCAN_RETRY_INITIAL_DELAY", val: "soon"},
+		{name: "invalid retry max delay", key: "SCAN_RETRY_MAX_DELAY", val: "soon"},
 		{name: "invalid run once", key: "RUN_ONCE", val: "sometimes"},
 	}
 
@@ -246,7 +311,12 @@ func clearEnv(t *testing.T) {
 		"JPEG_QUALITY",
 		"MIN_BYTES",
 		"SCAN_INTERVAL",
+		"SCAN_ENABLED",
 		"PROCESS_DELAY",
+		"TRIGGER_QUEUE_SIZE",
+		"SCAN_RETRY_ATTEMPTS",
+		"SCAN_RETRY_INITIAL_DELAY",
+		"SCAN_RETRY_MAX_DELAY",
 		"RUN_ONCE",
 	} {
 		if err := os.Unsetenv(key); err != nil {
