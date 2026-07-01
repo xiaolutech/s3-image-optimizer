@@ -1,0 +1,50 @@
+services:
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-setup:
+    image: minio/mc:RELEASE.2024-01-13T08-44-48Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/source-assets &&
+      mc mb --ignore-existing local/source-assets-optimized
+      "
+
+  s3-image-optimizer:
+    build: .
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      PORT: "8080"
+      S3_ENDPOINT: minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_USE_SSL: "false"
+      SOURCE_BUCKET: source-assets
+      OPTIMIZED_BUCKET: source-assets-optimized
+      OPTIMIZATION_PROFILE: v1-jpeg82-png-best-w1920
+      MAX_WIDTH: "1920"
+      JPEG_QUALITY: "82"
+      MIN_BYTES: "524288"
+      SCAN_INTERVAL: 10m
+      RUN_ONCE: "false"
+    ports:
+      - "8080:8080"
