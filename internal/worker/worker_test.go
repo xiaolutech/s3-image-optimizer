@@ -173,6 +173,63 @@ func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
 	}
 }
 
+func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
+	store := newFakeStore()
+	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         source.Key,
+		Size:        source.Size,
+		ETag:        source.ETag,
+		ContentType: "video/webm",
+	}, body: []byte("large video")}
+	store.objects[objKey("optimized", skipMarkerKey(source.Key))] = fakeObject{info: storage.ObjectInfo{
+		Key:         skipMarkerKey(source.Key),
+		Size:        100,
+		ETag:        "marker-etag",
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"source-etag":          source.ETag,
+			"optimization-profile": "v2-jpeg82-png-best-original-width",
+		},
+	}}
+
+	w := New(store, testWorkerConfig())
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	if store.getCalls != 0 {
+		t.Fatalf("expected no source get, got %d", store.getCalls)
+	}
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no puts, got %#v", store.putKeys)
+	}
+}
+
+func TestWorkerWritesUnsupportedSkipMarkerFromSourceHeadWithoutReadingBody(t *testing.T) {
+	store := newFakeStore()
+	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         source.Key,
+		Size:        source.Size,
+		ETag:        source.ETag,
+		ContentType: "video/webm",
+	}, body: []byte("large video")}
+
+	w := New(store, testWorkerConfig())
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	if store.getCalls != 0 {
+		t.Fatalf("expected no source get, got %d", store.getCalls)
+	}
+	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
+	if marker.Reason != "unsupported_content_type" {
+		t.Fatalf("expected unsupported_content_type, got %q", marker.Reason)
+	}
+}
+
 func TestWorkerWritesSkipMarkerForInsufficientSavings(t *testing.T) {
 	store := newFakeStore()
 	body := smallJPEG(t)

@@ -18,10 +18,10 @@ const (
 	sourceETagMetadata = "source-etag"
 	profileMetadata    = "optimization-profile"
 
-	headObjectTimeout      = 45 * time.Second
-	getObjectTimeout      = 120 * time.Second
-	putObjectTimeout      = 120 * time.Second
-	skipMarkerPutTimeout  = 45 * time.Second
+	headObjectTimeout    = 45 * time.Second
+	getObjectTimeout     = 120 * time.Second
+	putObjectTimeout     = 120 * time.Second
+	skipMarkerPutTimeout = 45 * time.Second
 )
 
 type Store interface {
@@ -81,6 +81,36 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 	if err == nil && isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile) {
 		log.Printf("skip current optimized object key=%s", source.Key)
 		return nil
+	}
+
+	if err := w.waitForRequestDelay(ctx); err != nil {
+		return err
+	}
+	skipCtx, skipCancel := context.WithTimeout(ctx, headObjectTimeout)
+	defer skipCancel()
+	skipMarker, err := w.store.HeadObject(skipCtx, w.cfg.OptimizedBucket, skipMarkerKey(source.Key))
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("head skip marker %s: %w", source.Key, err)
+	}
+	if err == nil && isCurrentOptimized(skipMarker, source, w.cfg.OptimizationProfile) {
+		log.Printf("skip current skip marker key=%s", source.Key)
+		return nil
+	}
+
+	if source.ContentType == "" {
+		if err := w.waitForRequestDelay(ctx); err != nil {
+			return err
+		}
+		sourceCtx, sourceCancel := context.WithTimeout(ctx, headObjectTimeout)
+		defer sourceCancel()
+		sourceInfo, err := w.store.HeadObject(sourceCtx, w.cfg.SourceBucket, source.Key)
+		if err != nil {
+			return fmt.Errorf("head source object %s: %w", source.Key, err)
+		}
+		source = *sourceInfo
+	}
+	if !imageopt.IsSupportedContentType(source.ContentType) {
+		return w.writeSkipMarker(ctx, source, "unsupported_content_type")
 	}
 
 	if err := w.waitForRequestDelay(ctx); err != nil {

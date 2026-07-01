@@ -31,9 +31,14 @@ type Result struct {
 	Reason      string
 }
 
+func IsSupportedContentType(contentType string) bool {
+	mediaType := normalizeContentType(contentType)
+	return mediaType == ContentTypeJPEG || mediaType == ContentTypePNG
+}
+
 func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 	mediaType := normalizeContentType(contentType)
-	if mediaType != ContentTypeJPEG && mediaType != ContentTypePNG {
+	if !IsSupportedContentType(mediaType) {
 		return skipped("unsupported_content_type"), nil
 	}
 	if opts.MaxWidth < 0 {
