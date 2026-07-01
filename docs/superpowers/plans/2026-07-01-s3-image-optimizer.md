@@ -16,7 +16,7 @@
 - [x] Task 2: Add config.
 - [x] Task 3: Add image optimizer.
 - [x] Task 4: Add S3 storage adapter.
-- [ ] Task 5: Add worker orchestration.
+- [x] Task 5: Add worker orchestration.
 - [ ] Task 6: Wire entrypoint and health endpoint.
 - [ ] Task 7: Add Docker, compose, CI, and docs.
 
