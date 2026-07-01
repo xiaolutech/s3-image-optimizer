@@ -46,8 +46,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ProcessDelay != 0 {
 		t.Fatalf("expected process delay 0, got %v", cfg.ProcessDelay)
 	}
-	if cfg.TriggerQueueSize != 256 {
-		t.Fatalf("expected trigger queue size 256, got %d", cfg.TriggerQueueSize)
+	if cfg.ScanBatchSize != 100 {
+		t.Fatalf("expected scan batch size 100, got %d", cfg.ScanBatchSize)
 	}
 	if cfg.ScanRetryAttempts != 8 {
 		t.Fatalf("expected scan retry attempts 8, got %d", cfg.ScanRetryAttempts)
@@ -80,7 +80,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("SCAN_INTERVAL", "5m")
 	t.Setenv("SCAN_ENABLED", "true")
 	t.Setenv("PROCESS_DELAY", "5s")
-	t.Setenv("TRIGGER_QUEUE_SIZE", "32")
+	t.Setenv("SCAN_BATCH_SIZE", "25")
 	t.Setenv("SCAN_RETRY_ATTEMPTS", "4")
 	t.Setenv("SCAN_RETRY_INITIAL_DELAY", "2s")
 	t.Setenv("SCAN_RETRY_MAX_DELAY", "30s")
@@ -118,8 +118,8 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.ProcessDelay != 5*time.Second {
 		t.Fatalf("expected process delay 5s, got %v", cfg.ProcessDelay)
 	}
-	if cfg.TriggerQueueSize != 32 {
-		t.Fatalf("expected trigger queue size 32, got %d", cfg.TriggerQueueSize)
+	if cfg.ScanBatchSize != 25 {
+		t.Fatalf("expected scan batch size 25, got %d", cfg.ScanBatchSize)
 	}
 	if cfg.ScanRetryAttempts != 4 {
 		t.Fatalf("expected scan retry attempts 4, got %d", cfg.ScanRetryAttempts)
@@ -202,9 +202,9 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			wantError: "SCAN_RETRY_ATTEMPTS",
 		},
 		{
-			name:      "invalid trigger queue size",
-			mutate:    func(cfg *Config) { cfg.TriggerQueueSize = 0 },
-			wantError: "TRIGGER_QUEUE_SIZE",
+			name:      "invalid scan batch size",
+			mutate:    func(cfg *Config) { cfg.ScanBatchSize = 0 },
+			wantError: "SCAN_BATCH_SIZE",
 		},
 		{
 			name:      "negative retry initial delay",
@@ -252,7 +252,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
 		{name: "invalid scan enabled", key: "SCAN_ENABLED", val: "sometimes"},
 		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
-		{name: "invalid trigger queue size", key: "TRIGGER_QUEUE_SIZE", val: "many"},
+		{name: "invalid scan batch size", key: "SCAN_BATCH_SIZE", val: "many"},
 		{name: "invalid retry attempts", key: "SCAN_RETRY_ATTEMPTS", val: "many"},
 		{name: "invalid retry initial delay", key: "SCAN_RETRY_INITIAL_DELAY", val: "soon"},
 		{name: "invalid retry max delay", key: "SCAN_RETRY_MAX_DELAY", val: "soon"},
@@ -313,7 +313,7 @@ func clearEnv(t *testing.T) {
 		"SCAN_INTERVAL",
 		"SCAN_ENABLED",
 		"PROCESS_DELAY",
-		"TRIGGER_QUEUE_SIZE",
+		"SCAN_BATCH_SIZE",
 		"SCAN_RETRY_ATTEMPTS",
 		"SCAN_RETRY_INITIAL_DELAY",
 		"SCAN_RETRY_MAX_DELAY",

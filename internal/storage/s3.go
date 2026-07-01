@@ -26,6 +26,11 @@ type ObjectInfo struct {
 	Metadata    map[string]string
 }
 
+type ListPage struct {
+	Objects []ObjectInfo
+	HasMore bool
+}
+
 type PutOptions struct {
 	ContentType string
 	Metadata    map[string]string
@@ -127,6 +132,33 @@ func (c *Client) ListObjects(ctx context.Context, bucket, prefix string, visit f
 		}
 	}
 	return nil
+}
+
+func (c *Client) ListObjectsPage(ctx context.Context, bucket, prefix, startAfter string, maxKeys int32) (ListPage, error) {
+	input := &s3.ListObjectsV2Input{
+		Bucket:  aws.String(bucket),
+		Prefix:  aws.String(prefix),
+		MaxKeys: aws.Int32(maxKeys),
+	}
+	if startAfter != "" {
+		input.StartAfter = aws.String(startAfter)
+	}
+	out, err := c.client.ListObjectsV2(ctx, input)
+	if err != nil {
+		return ListPage{}, fmt.Errorf("list objects page: %w", err)
+	}
+	page := ListPage{
+		Objects: make([]ObjectInfo, 0, len(out.Contents)),
+		HasMore: aws.ToBool(out.IsTruncated),
+	}
+	for _, object := range out.Contents {
+		page.Objects = append(page.Objects, ObjectInfo{
+			Key:  aws.ToString(object.Key),
+			Size: aws.ToInt64(object.Size),
+			ETag: trimETag(aws.ToString(object.ETag)),
+		})
+	}
+	return page, nil
 }
 
 func IsNotFound(err error) bool {

@@ -41,6 +41,7 @@ func main() {
 		JPEGQuality:           cfg.JPEGQuality,
 		MinBytes:              cfg.MinBytes,
 		ProcessDelay:          cfg.ProcessDelay,
+		ScanBatchSize:         cfg.ScanBatchSize,
 		ScanRetryAttempts:     cfg.ScanRetryAttempts,
 		ScanRetryInitialDelay: cfg.ScanRetryInitialDelay,
 		ScanRetryMaxDelay:     cfg.ScanRetryMaxDelay,
@@ -49,8 +50,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	triggers := startTriggerQueue(ctx, w, cfg.TriggerQueueSize)
-	server := startHealthServer(cfg.Port, triggers)
+	server := startHealthServer(cfg.Port)
 	defer shutdownHealthServer(server)
 
 	if cfg.RunOnce {
@@ -65,12 +65,12 @@ func main() {
 		return
 	}
 
-	log.Printf("scan loop disabled; waiting for on-demand optimize triggers")
+	log.Printf("scan loop disabled; waiting for shutdown")
 	<-ctx.Done()
 	log.Printf("shutdown requested")
 }
 
-func startHealthServer(port string, triggers *triggerQueue) *http.Server {
+func startHealthServer(port string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -81,7 +81,6 @@ func startHealthServer(port string, triggers *triggerQueue) *http.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"healthy"}`))
 	})
-	mux.HandleFunc("/optimize", optimizeHandler(triggers))
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%s", port),
@@ -146,9 +145,10 @@ func runLoop(ctx context.Context, w *worker.Worker, interval time.Duration) {
 func runScan(ctx context.Context, w *worker.Worker) {
 	start := time.Now()
 	log.Printf("scan started")
-	if err := w.RunOnce(ctx); err != nil {
+	result, err := w.RunScanRound(ctx)
+	if err != nil {
 		log.Printf("scan failed: %v", err)
 		return
 	}
-	log.Printf("scan completed duration=%s", time.Since(start))
+	log.Printf("scan completed duration=%s processed=%d last_key=%q has_more=%t", time.Since(start), result.Processed, result.LastKey, result.HasMore)
 }

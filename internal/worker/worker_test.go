@@ -273,24 +273,6 @@ func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	}
 }
 
-func TestWorkerProcessKeyHeadsSourceWithoutListingBucket(t *testing.T) {
-	store := newFakeStore()
-	body := largeJPEG(t)
-	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
-
-	w := New(store, testWorkerConfig())
-	if err := w.ProcessKey(context.Background(), "photo.jpg"); err != nil {
-		t.Fatalf("ProcessKey failed: %v", err)
-	}
-
-	if store.listCalls != 0 {
-		t.Fatalf("expected no list calls, got %d", store.listCalls)
-	}
-	if _, ok := store.objects[objKey("optimized", "photo.jpg")]; !ok {
-		t.Fatal("expected photo.jpg optimized object")
-	}
-}
-
 func TestWorkerRunOnceRetriesTransientListErrors(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
@@ -340,6 +322,62 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	}
 }
 
+func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	for _, key := range []string{"a.jpg", "b.jpg", "c.jpg"} {
+		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
+			Key:         key,
+			Size:        int64(len(body)),
+			ETag:        key + "-etag",
+			ContentType: "image/jpeg",
+		}, body: body}
+	}
+	cfg := testWorkerConfig()
+	cfg.ScanBatchSize = 2
+
+	w := New(store, cfg)
+	first, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("first RunScanRound failed: %v", err)
+	}
+	if !first.HasMore {
+		t.Fatal("expected first scan round to report more objects")
+	}
+	if first.LastKey != "b.jpg" {
+		t.Fatalf("expected first last key b.jpg, got %q", first.LastKey)
+	}
+	if _, ok := store.objects[objKey("optimized", "a.jpg")]; !ok {
+		t.Fatal("expected a.jpg optimized object")
+	}
+	if _, ok := store.objects[objKey("optimized", "b.jpg")]; !ok {
+		t.Fatal("expected b.jpg optimized object")
+	}
+	if _, ok := store.objects[objKey("optimized", "c.jpg")]; ok {
+		t.Fatal("did not expect c.jpg to be processed in first batch")
+	}
+
+	second, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("second RunScanRound failed: %v", err)
+	}
+	if second.HasMore {
+		t.Fatal("expected second scan round to reach bucket end")
+	}
+	if second.LastKey != "c.jpg" {
+		t.Fatalf("expected second last key c.jpg, got %q", second.LastKey)
+	}
+	if _, ok := store.objects[objKey("optimized", "c.jpg")]; !ok {
+		t.Fatal("expected c.jpg optimized object")
+	}
+	if store.listStartAfterCalls[0] != "" {
+		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
+	}
+	if store.listStartAfterCalls[1] != "b.jpg" {
+		t.Fatalf("expected second list to start after b.jpg, got %q", store.listStartAfterCalls[1])
+	}
+}
+
 type fakeObject struct {
 	info storage.ObjectInfo
 	body []byte
@@ -354,6 +392,7 @@ type fakeStore struct {
 	listErrorsRemaining int
 	listErr             error
 	headErrors          map[string]error
+	listStartAfterCalls []string
 }
 
 func newFakeStore() *fakeStore {
@@ -427,6 +466,58 @@ func (s *fakeStore) ListObjects(ctx context.Context, bucket, prefix string, visi
 	return nil
 }
 
+func (s *fakeStore) ListObjectsPage(ctx context.Context, bucket, prefix, startAfter string, maxKeys int32) (storage.ListPage, error) {
+	s.listCalls++
+	s.listBucket = bucket
+	s.listStartAfterCalls = append(s.listStartAfterCalls, startAfter)
+	if s.listErrorsRemaining > 0 {
+		s.listErrorsRemaining--
+		return storage.ListPage{}, s.listErr
+	}
+	var keys []string
+	for fullKey, obj := range s.objects {
+		if !strings.HasPrefix(fullKey, bucket+"/") {
+			continue
+		}
+		if !strings.HasPrefix(obj.info.Key, prefix) {
+			continue
+		}
+		if startAfter != "" && obj.info.Key <= startAfter {
+			continue
+		}
+		keys = append(keys, obj.info.Key)
+	}
+	sort.Strings(keys)
+	if maxKeys > 0 && len(keys) > int(maxKeys) {
+		keys = keys[:maxKeys]
+	}
+	objects := make([]storage.ObjectInfo, 0, len(keys))
+	for _, key := range keys {
+		objects = append(objects, s.objects[objKey(bucket, key)].info)
+	}
+	return storage.ListPage{
+		Objects: objects,
+		HasMore: maxKeys > 0 &&
+			len(keys) == int(maxKeys) &&
+			s.hasKeyAfter(bucket, prefix, keys[len(keys)-1]),
+	}, nil
+}
+
+func (s *fakeStore) hasKeyAfter(bucket, prefix, key string) bool {
+	for fullKey, obj := range s.objects {
+		if !strings.HasPrefix(fullKey, bucket+"/") {
+			continue
+		}
+		if !strings.HasPrefix(obj.info.Key, prefix) {
+			continue
+		}
+		if obj.info.Key > key {
+			return true
+		}
+	}
+	return false
+}
+
 type errNotFound struct{}
 
 func (errNotFound) Error() string { return "not found" }
@@ -456,6 +547,7 @@ func testWorkerConfig() Config {
 		MaxWidth:            0,
 		JPEGQuality:         82,
 		MinBytes:            512,
+		ScanBatchSize:       100,
 	}
 }
 

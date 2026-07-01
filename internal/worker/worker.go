@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/xiaolutech/s3-image-optimizer/internal/imageopt"
@@ -29,6 +30,7 @@ type Store interface {
 	GetObject(ctx context.Context, bucket, key string) ([]byte, *storage.ObjectInfo, error)
 	PutObject(ctx context.Context, bucket, key string, body []byte, opts storage.PutOptions) error
 	ListObjects(ctx context.Context, bucket, prefix string, visit func(storage.ObjectInfo) error) error
+	ListObjectsPage(ctx context.Context, bucket, prefix, startAfter string, maxKeys int32) (storage.ListPage, error)
 }
 
 type Config struct {
@@ -39,14 +41,17 @@ type Config struct {
 	JPEGQuality           int
 	MinBytes              int64
 	ProcessDelay          time.Duration
+	ScanBatchSize         int
 	ScanRetryAttempts     int
 	ScanRetryInitialDelay time.Duration
 	ScanRetryMaxDelay     time.Duration
 }
 
 type Worker struct {
-	store Store
-	cfg   Config
+	store       Store
+	cfg         Config
+	cursorMu    sync.Mutex
+	scanLastKey string
 }
 
 type SkipMarker struct {
@@ -54,6 +59,12 @@ type SkipMarker struct {
 	SourceETag string `json:"source_etag"`
 	Profile    string `json:"profile"`
 	Reason     string `json:"reason"`
+}
+
+type ScanRoundResult struct {
+	Processed int
+	LastKey   string
+	HasMore   bool
 }
 
 func New(store Store, cfg Config) *Worker {
@@ -100,6 +111,35 @@ func (w *Worker) runOnce(ctx context.Context) error {
 	})
 }
 
+func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
+	batchSize := w.cfg.ScanBatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	startAfter := w.getScanLastKey()
+	page, err := w.store.ListObjectsPage(ctx, w.cfg.SourceBucket, "", startAfter, int32(batchSize))
+	if err != nil {
+		return ScanRoundResult{}, err
+	}
+
+	result := ScanRoundResult{HasMore: page.HasMore}
+	for _, info := range page.Objects {
+		if err := w.ProcessObject(ctx, info); err != nil {
+			return result, processObjectError{err: err}
+		}
+		result.Processed++
+		result.LastKey = info.Key
+	}
+
+	if result.LastKey != "" && result.HasMore {
+		w.setScanLastKey(result.LastKey)
+	} else {
+		w.setScanLastKey("")
+	}
+	return result, nil
+}
+
 type processObjectError struct {
 	err error
 }
@@ -110,22 +150,6 @@ func (e processObjectError) Error() string {
 
 func (e processObjectError) Unwrap() error {
 	return e.err
-}
-
-func (w *Worker) ProcessKey(ctx context.Context, key string) error {
-	if key == "" {
-		return fmt.Errorf("source key is required")
-	}
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
-	}
-	sourceCtx, sourceCancel := context.WithTimeout(ctx, headObjectTimeout)
-	defer sourceCancel()
-	source, err := w.store.HeadObject(sourceCtx, w.cfg.SourceBucket, key)
-	if err != nil {
-		return fmt.Errorf("head source object %s: %w", key, err)
-	}
-	return w.ProcessObject(ctx, *source)
 }
 
 func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) error {
@@ -237,6 +261,18 @@ func (w *Worker) nextRetryDelay(delay time.Duration) time.Duration {
 		return w.cfg.ScanRetryMaxDelay
 	}
 	return next
+}
+
+func (w *Worker) getScanLastKey() string {
+	w.cursorMu.Lock()
+	defer w.cursorMu.Unlock()
+	return w.scanLastKey
+}
+
+func (w *Worker) setScanLastKey(key string) {
+	w.cursorMu.Lock()
+	defer w.cursorMu.Unlock()
+	w.scanLastKey = key
 }
 
 func wait(ctx context.Context, delay time.Duration) error {

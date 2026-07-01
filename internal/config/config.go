@@ -24,11 +24,11 @@ type Config struct {
 	JPEGQuality         int
 	MinBytes            int64
 
-	ScanInterval     time.Duration
-	ScanEnabled      bool
-	RunOnce          bool
-	ProcessDelay     time.Duration
-	TriggerQueueSize int
+	ScanInterval  time.Duration
+	ScanEnabled   bool
+	RunOnce       bool
+	ProcessDelay  time.Duration
+	ScanBatchSize int
 
 	ScanRetryAttempts     int
 	ScanRetryInitialDelay time.Duration
@@ -47,7 +47,7 @@ func DefaultConfig() *Config {
 		ScanInterval:          24 * time.Hour,
 		ScanEnabled:           false,
 		ProcessDelay:          0,
-		TriggerQueueSize:      256,
+		ScanBatchSize:         100,
 		ScanRetryAttempts:     8,
 		ScanRetryInitialDelay: 5 * time.Second,
 		ScanRetryMaxDelay:     2 * time.Minute,
@@ -87,7 +87,7 @@ func Load() (*Config, error) {
 	if cfg.ProcessDelay, err = getenvDuration("PROCESS_DELAY", cfg.ProcessDelay); err != nil {
 		return nil, err
 	}
-	if cfg.TriggerQueueSize, err = getenvInt("TRIGGER_QUEUE_SIZE", cfg.TriggerQueueSize); err != nil {
+	if cfg.ScanBatchSize, err = getenvInt("SCAN_BATCH_SIZE", cfg.ScanBatchSize); err != nil {
 		return nil, err
 	}
 	if cfg.ScanRetryAttempts, err = getenvInt("SCAN_RETRY_ATTEMPTS", cfg.ScanRetryAttempts); err != nil {
@@ -145,8 +145,8 @@ func (c *Config) Validate() error {
 	if c.ProcessDelay < 0 {
 		return fmt.Errorf("PROCESS_DELAY cannot be negative")
 	}
-	if c.TriggerQueueSize < 1 {
-		return fmt.Errorf("TRIGGER_QUEUE_SIZE must be at least 1")
+	if c.ScanBatchSize < 1 {
+		return fmt.Errorf("SCAN_BATCH_SIZE must be at least 1")
 	}
 	if c.ScanRetryAttempts < 1 {
 		return fmt.Errorf("SCAN_RETRY_ATTEMPTS must be at least 1")
