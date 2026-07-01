@@ -83,7 +83,7 @@ func TestS3ClientObjectOperations(t *testing.T) {
 		ContentType: "image/jpeg",
 		Metadata: map[string]string{
 			"source-etag":          info.ETag,
-			"optimization-profile": "v1-jpeg82-png-best-w1920",
+			"optimization-profile": "v2-jpeg82-png-best-original-width",
 		},
 	})
 	if err != nil {
@@ -97,7 +97,7 @@ func TestS3ClientObjectOperations(t *testing.T) {
 	if optimizedInfo.Metadata["source-etag"] != info.ETag {
 		t.Fatalf("expected source-etag metadata, got %#v", optimizedInfo.Metadata)
 	}
-	if optimizedInfo.Metadata["optimization-profile"] != "v1-jpeg82-png-best-w1920" {
+	if optimizedInfo.Metadata["optimization-profile"] != "v2-jpeg82-png-best-original-width" {
 		t.Fatalf("expected optimization-profile metadata, got %#v", optimizedInfo.Metadata)
 	}
 }

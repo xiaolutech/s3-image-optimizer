@@ -40,8 +40,8 @@ services:
       S3_USE_SSL: "false"
       SOURCE_BUCKET: source-assets
       OPTIMIZED_BUCKET: source-assets-optimized
-      OPTIMIZATION_PROFILE: v1-jpeg82-png-best-w1920
-      MAX_WIDTH: "1920"
+      OPTIMIZATION_PROFILE: v2-jpeg82-png-best-original-width
+      MAX_WIDTH: "0"
       JPEG_QUALITY: "82"
       MIN_BYTES: "524288"
       SCAN_INTERVAL: 10m

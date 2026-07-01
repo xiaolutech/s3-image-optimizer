@@ -36,8 +36,8 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 	if mediaType != ContentTypeJPEG && mediaType != ContentTypePNG {
 		return skipped("unsupported_content_type"), nil
 	}
-	if opts.MaxWidth < 1 {
-		return Result{}, fmt.Errorf("max width must be positive")
+	if opts.MaxWidth < 0 {
+		return Result{}, fmt.Errorf("max width cannot be negative")
 	}
 	if opts.JPEGQuality < 1 || opts.JPEGQuality > 100 {
 		return Result{}, fmt.Errorf("jpeg quality must be between 1 and 100")
@@ -54,7 +54,7 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-	if width > opts.MaxWidth {
+	if opts.MaxWidth > 0 && width > opts.MaxWidth {
 		height = scaledHeight(width, height, opts.MaxWidth)
 		width = opts.MaxWidth
 		img = resize(img, width, height)

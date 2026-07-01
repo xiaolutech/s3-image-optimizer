@@ -80,6 +80,35 @@ func TestOptimizePNGResizesAndKeepsFormat(t *testing.T) {
 	}
 }
 
+func TestOptimizeWithZeroMaxWidthKeepsOriginalDimensions(t *testing.T) {
+	input := encodeJPEG(t, gradientImage(3000, 1200), 95)
+
+	result, err := Optimize(input, "image/jpeg", Options{
+		MaxWidth:    0,
+		JPEGQuality: 82,
+		MinSavings:  0,
+	})
+	if err != nil {
+		t.Fatalf("Optimize failed: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected optimized JPEG, skipped with %s", result.Reason)
+	}
+	if result.Width != 3000 {
+		t.Fatalf("expected width 3000, got %d", result.Width)
+	}
+	if result.Height != 1200 {
+		t.Fatalf("expected height 1200, got %d", result.Height)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(result.Body))
+	if err != nil {
+		t.Fatalf("decode optimized jpeg: %v", err)
+	}
+	if cfg.Width != 3000 || cfg.Height != 1200 {
+		t.Fatalf("unexpected decoded dimensions %dx%d", cfg.Width, cfg.Height)
+	}
+}
+
 func TestOptimizeSkipsUnsupportedContentType(t *testing.T) {
 	var buf bytes.Buffer
 	if err := gif.Encode(&buf, gradientImage(100, 100), nil); err != nil {

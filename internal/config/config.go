@@ -33,8 +33,8 @@ func DefaultConfig() *Config {
 		Port:                "8080",
 		S3Region:            "us-east-1",
 		S3UseSSL:            true,
-		OptimizationProfile: "v1-jpeg82-png-best-w1920",
-		MaxWidth:            1920,
+		OptimizationProfile: "v2-jpeg82-png-best-original-width",
+		MaxWidth:            0,
 		JPEGQuality:         82,
 		MinBytes:            512 * 1024,
 		ScanInterval:        10 * time.Minute,
@@ -99,8 +99,8 @@ func (c *Config) Validate() error {
 	if c.OptimizationProfile == "" {
 		return fmt.Errorf("OPTIMIZATION_PROFILE is required")
 	}
-	if c.MaxWidth < 1 {
-		return fmt.Errorf("MAX_WIDTH must be positive")
+	if c.MaxWidth < 0 {
+		return fmt.Errorf("MAX_WIDTH cannot be negative")
 	}
 	if c.JPEGQuality < 1 || c.JPEGQuality > 100 {
 		return fmt.Errorf("JPEG_QUALITY must be between 1 and 100")

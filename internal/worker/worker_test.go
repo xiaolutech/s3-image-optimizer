@@ -39,7 +39,7 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 	if written.info.Metadata["source-etag"] != "source-etag" {
 		t.Fatalf("expected source-etag metadata, got %#v", written.info.Metadata)
 	}
-	if written.info.Metadata["optimization-profile"] != "v1-jpeg82-png-best-w1920" {
+	if written.info.Metadata["optimization-profile"] != "v2-jpeg82-png-best-original-width" {
 		t.Fatalf("expected profile metadata, got %#v", written.info.Metadata)
 	}
 	if store.getCalls != 1 {
@@ -57,7 +57,7 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 		ContentType: "image/jpeg",
 		Metadata: map[string]string{
 			"source-etag":          "source-etag",
-			"optimization-profile": "v1-jpeg82-png-best-w1920",
+			"optimization-profile": "v2-jpeg82-png-best-original-width",
 		},
 	}}
 
@@ -98,6 +98,36 @@ func TestWorkerRewritesStaleOptimizedObject(t *testing.T) {
 	written := store.objects[objKey("optimized", source.Key)]
 	if written.info.Metadata["source-etag"] != "new-etag" {
 		t.Fatalf("expected rewritten metadata, got %#v", written.info.Metadata)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
+	}
+}
+
+func TestWorkerRewritesOldOptimizationProfile(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+	store.objects[objKey("optimized", source.Key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         source.Key,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "image/jpeg",
+		Metadata: map[string]string{
+			"source-etag":          "source-etag",
+			"optimization-profile": "v1-jpeg82-png-best-w1920",
+		},
+	}}
+
+	w := New(store, testWorkerConfig())
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	written := store.objects[objKey("optimized", source.Key)]
+	if written.info.Metadata["optimization-profile"] != "v2-jpeg82-png-best-original-width" {
+		t.Fatalf("expected rewritten profile metadata, got %#v", written.info.Metadata)
 	}
 	if store.getCalls != 1 {
 		t.Fatalf("expected one source get, got %d", store.getCalls)
@@ -281,8 +311,8 @@ func testWorkerConfig() Config {
 	return Config{
 		SourceBucket:        "source",
 		OptimizedBucket:     "optimized",
-		OptimizationProfile: "v1-jpeg82-png-best-w1920",
-		MaxWidth:            1920,
+		OptimizationProfile: "v2-jpeg82-png-best-original-width",
+		MaxWidth:            0,
 		JPEGQuality:         82,
 		MinBytes:            512,
 	}

@@ -25,7 +25,7 @@ the worker writes:
 bucket: logseq-assets-optimized
 key: notes/photo.jpg
 x-amz-meta-source-etag: abc123
-x-amz-meta-optimization-profile: v1-jpeg82-png-best-w1920
+x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 ```
 
 `s3-static` uses those metadata values to decide whether the optimized object is safe to serve. If the source ETag changes or the profile changes, `s3-static` falls back to the source object until this worker rewrites the optimized copy.
@@ -34,7 +34,8 @@ x-amz-meta-optimization-profile: v1-jpeg82-png-best-w1920
 
 - Scans `SOURCE_BUCKET`.
 - Supports JPEG and PNG.
-- Resizes images wider than `MAX_WIDTH`.
+- Keeps original image dimensions by default.
+- Resizes images wider than `MAX_WIDTH` only when `MAX_WIDTH` is greater than `0`.
 - Re-encodes JPEG with `JPEG_QUALITY`.
 - Re-encodes PNG with best compression.
 - Writes optimized objects to `OPTIMIZED_BUCKET` using the same key.
@@ -52,8 +53,8 @@ x-amz-meta-optimization-profile: v1-jpeg82-png-best-w1920
 - `S3_USE_SSL` - Use HTTPS for S3. Default: `true`.
 - `SOURCE_BUCKET` - Bucket containing original objects.
 - `OPTIMIZED_BUCKET` - Bucket receiving optimized same-key objects.
-- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v1-jpeg82-png-best-w1920`.
-- `MAX_WIDTH` - Maximum output image width. Default: `1920`.
+- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v2-jpeg82-png-best-original-width`.
+- `MAX_WIDTH` - Maximum output image width. Set to `0` to preserve original dimensions. Default: `0`.
 - `JPEG_QUALITY` - JPEG output quality, 1 through 100. Default: `82`.
 - `MIN_BYTES` - Minimum source object size before optimization. Default: `524288`.
 - `SCAN_INTERVAL` - Interval for continuous scanning. Default: `10m`.
