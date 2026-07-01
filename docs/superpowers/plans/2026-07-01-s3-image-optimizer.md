@@ -13,7 +13,7 @@
 ## Implementation Status
 
 - [x] Task 1: Bootstrap Go repo.
-- [ ] Task 2: Add config.
+- [x] Task 2: Add config.
 - [ ] Task 3: Add image optimizer.
 - [ ] Task 4: Add S3 storage adapter.
 - [ ] Task 5: Add worker orchestration.
