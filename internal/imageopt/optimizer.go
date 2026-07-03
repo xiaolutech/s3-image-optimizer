@@ -53,7 +53,7 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		return Result{}, fmt.Errorf("decode image: %w", err)
+		return skipped("decode_image_failed"), nil
 	}
 
 	bounds := img.Bounds()

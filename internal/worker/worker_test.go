@@ -175,6 +175,33 @@ func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
 	}
 }
 
+func TestWorkerWritesSkipMarkerForUndecodableSupportedSource(t *testing.T) {
+	store := newFakeStore()
+	source := storage.ObjectInfo{
+		Key:         "notes/bad.jpg",
+		Size:        1024,
+		ETag:        "bad-jpeg-etag",
+		ContentType: "image/jpeg",
+	}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: []byte("not actually a jpeg")}
+
+	w := New(store, testWorkerConfig())
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
+	if marker.SourceKey != source.Key {
+		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
+	}
+	if marker.SourceETag != "bad-jpeg-etag" {
+		t.Fatalf("expected source etag bad-jpeg-etag, got %q", marker.SourceETag)
+	}
+	if marker.Reason != "decode_image_failed" {
+		t.Fatalf("expected decode_image_failed, got %q", marker.Reason)
+	}
+}
+
 func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}

@@ -131,6 +131,23 @@ func TestOptimizeSkipsUnsupportedContentType(t *testing.T) {
 	}
 }
 
+func TestOptimizeSkipsUndecodableSupportedContent(t *testing.T) {
+	result, err := Optimize([]byte("not actually a jpeg"), "image/jpeg", Options{
+		MaxWidth:    1920,
+		JPEGQuality: 82,
+		MinSavings:  0.05,
+	})
+	if err != nil {
+		t.Fatalf("Optimize failed: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("expected undecodable image to be skipped")
+	}
+	if result.Reason != "decode_image_failed" {
+		t.Fatalf("expected decode_image_failed, got %q", result.Reason)
+	}
+}
+
 func TestOptimizeSkipsInsufficientSavings(t *testing.T) {
 	input := encodeJPEG(t, gradientImage(200, 100), 82)
 
