@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -419,11 +417,7 @@ func skipMarkerKey(sourceKey string) string {
 }
 
 func optimizedVariantKey(sourceKey, format string) string {
-	ext := path.Ext(sourceKey)
-	if ext == "" {
-		return sourceKey + "." + format
-	}
-	return strings.TrimSuffix(sourceKey, ext) + "." + format
+	return sourceKey + "." + format
 }
 
 type notFoundError interface {

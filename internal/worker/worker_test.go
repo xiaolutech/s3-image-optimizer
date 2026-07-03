@@ -31,7 +31,7 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	written := store.objects[objKey("optimized", "notes/photo.webp")]
+	written := store.objects[objKey("optimized", "notes/photo.jpg.webp")]
 	if len(written.body) == 0 {
 		t.Fatal("expected optimized object to be written")
 	}
@@ -55,8 +55,8 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
-	store.objects[objKey("optimized", "notes/photo.webp")] = fakeObject{info: storage.ObjectInfo{
-		Key:         "notes/photo.webp",
+	store.objects[objKey("optimized", "notes/photo.jpg.webp")] = fakeObject{info: storage.ObjectInfo{
+		Key:         "notes/photo.jpg.webp",
 		Size:        100,
 		ETag:        "optimized-etag",
 		ContentType: "image/webp",
@@ -84,8 +84,8 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 
 func TestOptimizedObjectContractVector(t *testing.T) {
 	const sourceKey = "notes/photo.png"
-	const expectedAVIFKey = "notes/photo.avif"
-	const expectedWebPKey = "notes/photo.webp"
+	const expectedAVIFKey = "notes/photo.png.avif"
+	const expectedWebPKey = "notes/photo.png.webp"
 
 	if got := optimizedVariantKey(sourceKey, avifVariantFormat); got != expectedAVIFKey {
 		t.Fatalf("unexpected AVIF optimized key:\n got: %s\nwant: %s", got, expectedAVIFKey)
@@ -161,7 +161,7 @@ func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 	if written.info.Metadata["variant-format"] != "avif" {
 		t.Fatalf("expected variant-format metadata, got %#v", written.info.Metadata)
 	}
-	if _, ok := store.objects[objKey("optimized", "notes/photo.webp")]; ok {
+	if _, ok := store.objects[objKey("optimized", "notes/photo.jpg.webp")]; ok {
 		t.Fatalf("did not expect webp optimized object when AVIF is enabled")
 	}
 }

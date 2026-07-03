@@ -6,16 +6,16 @@ Public URL serving is intentionally out of scope. `s3-static` remains the public
 
 ## Contract With s3-static
 
-By default, this worker writes WebP sidecar objects that mirror the source bucket path and replace the file extension:
+By default, this worker writes WebP sidecar objects that mirror the source bucket path and append the output format suffix:
 
 ```text
-notes/photo.jpg -> notes/photo.webp
+notes/photo.jpg -> notes/photo.jpg.webp
 ```
 
 When `AVIF_ENABLED=true`, it writes AVIF sidecar objects with the same mirrored key rule:
 
 ```text
-notes/photo.jpg -> notes/photo.avif
+notes/photo.jpg -> notes/photo.jpg.avif
 ```
 
 Every optimized object includes:
@@ -38,7 +38,7 @@ the worker writes:
 
 ```text
 bucket: logseq-assets-optimized
-key: notes/photo.webp
+key: notes/photo.jpg.webp
 x-amz-meta-source-key: notes/photo.jpg
 x-amz-meta-source-etag: abc123
 x-amz-meta-optimization-profile: v6-webp-q82-original
