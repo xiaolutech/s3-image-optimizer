@@ -37,6 +37,21 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MinBytes != 512*1024 {
 		t.Fatalf("expected min bytes 524288, got %d", cfg.MinBytes)
 	}
+	if cfg.AVIFEnabled {
+		t.Fatal("expected AVIFEnabled false by default")
+	}
+	if cfg.AVIFTargetBytes != 1024*1024 {
+		t.Fatalf("expected AVIF target bytes 1048576, got %d", cfg.AVIFTargetBytes)
+	}
+	if cfg.AVIFQualityMin != 35 {
+		t.Fatalf("expected AVIF min quality 35, got %d", cfg.AVIFQualityMin)
+	}
+	if cfg.AVIFQualityMax != 75 {
+		t.Fatalf("expected AVIF max quality 75, got %d", cfg.AVIFQualityMax)
+	}
+	if cfg.AVIFSpeed != 6 {
+		t.Fatalf("expected AVIF speed 6, got %d", cfg.AVIFSpeed)
+	}
 	if cfg.ScanInterval != 24*time.Hour {
 		t.Fatalf("expected scan interval 24h, got %v", cfg.ScanInterval)
 	}
@@ -77,6 +92,11 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("MAX_WIDTH", "2560")
 	t.Setenv("JPEG_QUALITY", "76")
 	t.Setenv("MIN_BYTES", "262144")
+	t.Setenv("AVIF_ENABLED", "true")
+	t.Setenv("AVIF_TARGET_BYTES", "786432")
+	t.Setenv("AVIF_QUALITY_MIN", "30")
+	t.Setenv("AVIF_QUALITY_MAX", "70")
+	t.Setenv("AVIF_SPEED", "8")
 	t.Setenv("SCAN_INTERVAL", "5m")
 	t.Setenv("SCAN_ENABLED", "true")
 	t.Setenv("PROCESS_DELAY", "5s")
@@ -108,6 +128,18 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.MaxWidth != 2560 || cfg.JPEGQuality != 76 || cfg.MinBytes != 262144 {
 		t.Fatalf("unexpected optimization config: %#v", cfg)
+	}
+	if !cfg.AVIFEnabled {
+		t.Fatal("expected AVIF enabled")
+	}
+	if cfg.AVIFTargetBytes != 786432 {
+		t.Fatalf("expected AVIF target bytes 786432, got %d", cfg.AVIFTargetBytes)
+	}
+	if cfg.AVIFQualityMin != 30 || cfg.AVIFQualityMax != 70 {
+		t.Fatalf("unexpected AVIF quality range: min=%d max=%d", cfg.AVIFQualityMin, cfg.AVIFQualityMax)
+	}
+	if cfg.AVIFSpeed != 8 {
+		t.Fatalf("expected AVIF speed 8, got %d", cfg.AVIFSpeed)
 	}
 	if cfg.ScanInterval != 5*time.Minute {
 		t.Fatalf("expected scan interval 5m, got %v", cfg.ScanInterval)
@@ -192,6 +224,46 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			wantError: "MIN_BYTES",
 		},
 		{
+			name:      "negative AVIF target bytes",
+			mutate:    func(cfg *Config) { cfg.AVIFTargetBytes = -1 },
+			wantError: "AVIF_TARGET_BYTES",
+		},
+		{
+			name:      "invalid AVIF min quality low",
+			mutate:    func(cfg *Config) { cfg.AVIFQualityMin = -1 },
+			wantError: "AVIF_QUALITY_MIN",
+		},
+		{
+			name:      "invalid AVIF min quality high",
+			mutate:    func(cfg *Config) { cfg.AVIFQualityMin = 101 },
+			wantError: "AVIF_QUALITY_MIN",
+		},
+		{
+			name:      "invalid AVIF max quality low",
+			mutate:    func(cfg *Config) { cfg.AVIFQualityMax = -1 },
+			wantError: "AVIF_QUALITY_MAX",
+		},
+		{
+			name:      "invalid AVIF max quality high",
+			mutate:    func(cfg *Config) { cfg.AVIFQualityMax = 101 },
+			wantError: "AVIF_QUALITY_MAX",
+		},
+		{
+			name:      "AVIF min quality exceeds max",
+			mutate:    func(cfg *Config) { cfg.AVIFQualityMin = 80; cfg.AVIFQualityMax = 70 },
+			wantError: "AVIF_QUALITY_MIN",
+		},
+		{
+			name:      "invalid AVIF speed low",
+			mutate:    func(cfg *Config) { cfg.AVIFSpeed = -1 },
+			wantError: "AVIF_SPEED",
+		},
+		{
+			name:      "invalid AVIF speed high",
+			mutate:    func(cfg *Config) { cfg.AVIFSpeed = 11 },
+			wantError: "AVIF_SPEED",
+		},
+		{
 			name:      "invalid scan interval",
 			mutate:    func(cfg *Config) { cfg.ScanInterval = 0 },
 			wantError: "SCAN_INTERVAL",
@@ -249,6 +321,11 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid max width", key: "MAX_WIDTH", val: "wide"},
 		{name: "invalid jpeg quality", key: "JPEG_QUALITY", val: "high"},
 		{name: "invalid min bytes", key: "MIN_BYTES", val: "many"},
+		{name: "invalid AVIF enabled", key: "AVIF_ENABLED", val: "sometimes"},
+		{name: "invalid AVIF target bytes", key: "AVIF_TARGET_BYTES", val: "many"},
+		{name: "invalid AVIF min quality", key: "AVIF_QUALITY_MIN", val: "low"},
+		{name: "invalid AVIF max quality", key: "AVIF_QUALITY_MAX", val: "high"},
+		{name: "invalid AVIF speed", key: "AVIF_SPEED", val: "fast"},
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
 		{name: "invalid scan enabled", key: "SCAN_ENABLED", val: "sometimes"},
 		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
@@ -310,6 +387,11 @@ func clearEnv(t *testing.T) {
 		"MAX_WIDTH",
 		"JPEG_QUALITY",
 		"MIN_BYTES",
+		"AVIF_ENABLED",
+		"AVIF_TARGET_BYTES",
+		"AVIF_QUALITY_MIN",
+		"AVIF_QUALITY_MAX",
+		"AVIF_SPEED",
 		"SCAN_INTERVAL",
 		"SCAN_ENABLED",
 		"PROCESS_DELAY",

@@ -23,6 +23,11 @@ type Config struct {
 	MaxWidth            int
 	JPEGQuality         int
 	MinBytes            int64
+	AVIFEnabled         bool
+	AVIFTargetBytes     int64
+	AVIFQualityMin      int
+	AVIFQualityMax      int
+	AVIFSpeed           int
 
 	ScanInterval  time.Duration
 	ScanEnabled   bool
@@ -44,6 +49,11 @@ func DefaultConfig() *Config {
 		MaxWidth:              0,
 		JPEGQuality:           82,
 		MinBytes:              512 * 1024,
+		AVIFEnabled:           false,
+		AVIFTargetBytes:       1024 * 1024,
+		AVIFQualityMin:        35,
+		AVIFQualityMax:        75,
+		AVIFSpeed:             6,
 		ScanInterval:          24 * time.Hour,
 		ScanEnabled:           false,
 		ProcessDelay:          0,
@@ -76,6 +86,21 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.MinBytes, err = getenvInt64("MIN_BYTES", cfg.MinBytes); err != nil {
+		return nil, err
+	}
+	if cfg.AVIFEnabled, err = getenvBool("AVIF_ENABLED", cfg.AVIFEnabled); err != nil {
+		return nil, err
+	}
+	if cfg.AVIFTargetBytes, err = getenvInt64("AVIF_TARGET_BYTES", cfg.AVIFTargetBytes); err != nil {
+		return nil, err
+	}
+	if cfg.AVIFQualityMin, err = getenvInt("AVIF_QUALITY_MIN", cfg.AVIFQualityMin); err != nil {
+		return nil, err
+	}
+	if cfg.AVIFQualityMax, err = getenvInt("AVIF_QUALITY_MAX", cfg.AVIFQualityMax); err != nil {
+		return nil, err
+	}
+	if cfg.AVIFSpeed, err = getenvInt("AVIF_SPEED", cfg.AVIFSpeed); err != nil {
 		return nil, err
 	}
 	if cfg.ScanInterval, err = getenvDuration("SCAN_INTERVAL", cfg.ScanInterval); err != nil {
@@ -138,6 +163,21 @@ func (c *Config) Validate() error {
 	}
 	if c.MinBytes < 0 {
 		return fmt.Errorf("MIN_BYTES cannot be negative")
+	}
+	if c.AVIFTargetBytes < 0 {
+		return fmt.Errorf("AVIF_TARGET_BYTES cannot be negative")
+	}
+	if c.AVIFQualityMin < 0 || c.AVIFQualityMin > 100 {
+		return fmt.Errorf("AVIF_QUALITY_MIN must be between 0 and 100")
+	}
+	if c.AVIFQualityMax < 0 || c.AVIFQualityMax > 100 {
+		return fmt.Errorf("AVIF_QUALITY_MAX must be between 0 and 100")
+	}
+	if c.AVIFQualityMin > c.AVIFQualityMax {
+		return fmt.Errorf("AVIF_QUALITY_MIN cannot exceed AVIF_QUALITY_MAX")
+	}
+	if c.AVIFSpeed < 0 || c.AVIFSpeed > 10 {
+		return fmt.Errorf("AVIF_SPEED must be between 0 and 10")
 	}
 	if c.ScanInterval <= 0 {
 		return fmt.Errorf("SCAN_INTERVAL must be positive")
