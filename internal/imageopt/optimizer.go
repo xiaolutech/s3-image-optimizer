@@ -8,18 +8,25 @@ import (
 	"image/png"
 	"strings"
 
+	avif "github.com/gen2brain/avif"
 	"golang.org/x/image/draw"
 )
 
 const (
 	ContentTypeJPEG = "image/jpeg"
 	ContentTypePNG  = "image/png"
+	ContentTypeAVIF = "image/avif"
 )
 
 type Options struct {
-	MaxWidth    int
-	JPEGQuality int
-	MinSavings  float64
+	MaxWidth        int
+	JPEGQuality     int
+	MinSavings      float64
+	AVIFEnabled     bool
+	AVIFTargetBytes int64
+	AVIFQualityMin  int
+	AVIFQualityMax  int
+	AVIFSpeed       int
 }
 
 type Result struct {
@@ -50,6 +57,11 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 	if opts.MinSavings < 0 || opts.MinSavings >= 1 {
 		return Result{}, fmt.Errorf("min savings must be >= 0 and < 1")
 	}
+	if opts.AVIFEnabled {
+		if err := validateAVIFOptions(opts); err != nil {
+			return Result{}, err
+		}
+	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
@@ -65,24 +77,55 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 		img = resize(img, width, height)
 	}
 
-	encoded, err := encode(img, mediaType, opts)
+	outputContentType := mediaType
+	var encoded []byte
+	if opts.AVIFEnabled {
+		outputContentType = ContentTypeAVIF
+		targetBytes, enforceTarget := avifSearchTarget(opts)
+		encoded, err = encodeAVIF(img, opts, targetBytes, enforceTarget)
+	} else {
+		encoded, err = encode(img, mediaType, opts)
+	}
 	if err != nil {
 		return Result{}, err
 	}
-	if float64(len(encoded)) >= float64(len(body))*(1-opts.MinSavings) {
+	if hasInsufficientSavings(len(encoded), len(body), opts) {
 		result := skipped("insufficient_savings")
 		result.Width = width
 		result.Height = height
-		result.ContentType = mediaType
+		result.ContentType = outputContentType
 		return result, nil
 	}
 
 	return Result{
 		Body:        encoded,
-		ContentType: mediaType,
+		ContentType: outputContentType,
 		Width:       width,
 		Height:      height,
 	}, nil
+}
+
+func validateAVIFOptions(opts Options) error {
+	if opts.AVIFTargetBytes < 0 {
+		return fmt.Errorf("avif target bytes cannot be negative")
+	}
+	if opts.AVIFQualityMin < 0 || opts.AVIFQualityMin > 100 {
+		return fmt.Errorf("avif quality min must be between 0 and 100")
+	}
+	if opts.AVIFQualityMax < 0 || opts.AVIFQualityMax > 100 {
+		return fmt.Errorf("avif quality max must be between 0 and 100")
+	}
+	if opts.AVIFQualityMin > opts.AVIFQualityMax {
+		return fmt.Errorf("avif quality min cannot exceed avif quality max")
+	}
+	if opts.AVIFSpeed < 0 || opts.AVIFSpeed > 10 {
+		return fmt.Errorf("avif speed must be between 0 and 10")
+	}
+	return nil
+}
+
+func hasInsufficientSavings(encodedBytes, originalBytes int, opts Options) bool {
+	return float64(encodedBytes) >= float64(originalBytes)*(1-opts.MinSavings)
 }
 
 func skipped(reason string) Result {
@@ -128,6 +171,66 @@ func encode(img image.Image, contentType string, opts Options) ([]byte, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unsupported content type %q", contentType)
+	}
+	return buf.Bytes(), nil
+}
+
+func avifSearchTarget(opts Options) (int64, bool) {
+	if opts.AVIFTargetBytes == 0 {
+		return 0, false
+	}
+	return opts.AVIFTargetBytes, true
+}
+
+func encodeAVIF(img image.Image, opts Options, targetBytes int64, enforceTarget bool) ([]byte, error) {
+	minQuality := opts.AVIFQualityMin
+	maxQuality := opts.AVIFQualityMax
+	speed := opts.AVIFSpeed
+
+	if !enforceTarget {
+		return encodeAVIFAtQuality(img, maxQuality, speed)
+	}
+
+	encodedMin, err := encodeAVIFAtQuality(img, minQuality, speed)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(encodedMin)) > targetBytes {
+		return encodedMin, nil
+	}
+
+	bestPassing := encodedMin
+	low := minQuality + 1
+	high := maxQuality
+	for low <= high {
+		quality := low + (high-low)/2
+		encoded, err := encodeAVIFAtQuality(img, quality, speed)
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(encoded)) <= targetBytes {
+			bestPassing = encoded
+			low = quality + 1
+			continue
+		}
+		high = quality - 1
+	}
+	return bestPassing, nil
+}
+
+func encodeAVIFAtQuality(img image.Image, quality, speed int) ([]byte, error) {
+	encodeQuality := quality
+	if encodeQuality == 0 {
+		encodeQuality = 1
+	}
+
+	var buf bytes.Buffer
+	if err := avif.Encode(&buf, img, avif.Options{
+		Quality:      encodeQuality,
+		QualityAlpha: encodeQuality,
+		Speed:        speed,
+	}); err != nil {
+		return nil, fmt.Errorf("encode avif: %w", err)
 	}
 	return buf.Bytes(), nil
 }
