@@ -1,0 +1,8 @@
+.git
+.github
+docs
+README.md
+compose.yaml
+justfile
+*.md
+*.log

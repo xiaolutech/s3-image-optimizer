@@ -1,10 +1,19 @@
+# syntax=docker/dockerfile:1.8
 FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -tags 'nodynamic netgo osusergo' -ldflags '-linkmode external -extldflags "-static"' -o s3-image-optimizer ./cmd/s3-image-optimizer
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY cmd ./cmd
+COPY internal ./internal
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -mod=readonly -tags 'nodynamic netgo osusergo' \
+      -ldflags '-linkmode external -extldflags "-static"' \
+      -o s3-image-optimizer ./cmd/s3-image-optimizer
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app

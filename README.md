@@ -111,7 +111,7 @@ just validate
 Build locally:
 
 ```bash
-docker build -t s3-image-optimizer:local .
+DOCKER_BUILDKIT=1 docker build -t s3-image-optimizer:local .
 ```
 
 Validate the local compose stack:
