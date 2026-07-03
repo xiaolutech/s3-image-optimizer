@@ -25,11 +25,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.OptimizedBucket != "" {
 		t.Fatalf("expected empty optimized bucket, got %q", cfg.OptimizedBucket)
 	}
-	if cfg.OptimizationProfile != "v6-webp-q82-original" {
+	if cfg.OptimizationProfile != "v7-webp-q82-w2560" {
 		t.Fatalf("unexpected profile %q", cfg.OptimizationProfile)
 	}
-	if cfg.MaxWidth != 0 {
-		t.Fatalf("expected max width 0, got %d", cfg.MaxWidth)
+	if cfg.MaxWidth != 2560 {
+		t.Fatalf("expected max width 2560, got %d", cfg.MaxWidth)
 	}
 	if cfg.JPEGQuality != 82 {
 		t.Fatalf("expected jpeg quality 82, got %d", cfg.JPEGQuality)

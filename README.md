@@ -41,7 +41,7 @@ bucket: logseq-assets-optimized
 key: notes/photo.jpg.webp
 x-amz-meta-source-key: notes/photo.jpg
 x-amz-meta-source-etag: abc123
-x-amz-meta-optimization-profile: v6-webp-q82-original
+x-amz-meta-optimization-profile: v7-webp-q82-w2560
 x-amz-meta-source-content-type: image/jpeg
 x-amz-meta-variant-format: webp
 ```
@@ -54,7 +54,7 @@ x-amz-meta-variant-format: webp
 - Runs bounded resident scan rounds when `SCAN_ENABLED=true`.
 - Runs one full-bucket scan and exits when `RUN_ONCE=true`.
 - Supports JPEG and PNG source objects.
-- Keeps original image dimensions by default.
+- Resizes images wider than 2560 pixels by default.
 - Resizes images wider than `MAX_WIDTH` only when `MAX_WIDTH` is greater than `0`.
 - Encodes supported source images to WebP when `AVIF_ENABLED=false`.
 - Encodes supported source images to AVIF when `AVIF_ENABLED=true`.
@@ -73,8 +73,8 @@ x-amz-meta-variant-format: webp
 - `S3_USE_SSL` - Use HTTPS for S3. Default: `true`.
 - `SOURCE_BUCKET` - Bucket containing original objects.
 - `OPTIMIZED_BUCKET` - Bucket receiving optimized objects.
-- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v6-webp-q82-original`.
-- `MAX_WIDTH` - Maximum output image width. Set to `0` to preserve original dimensions. Default: `0`.
+- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v7-webp-q82-w2560`.
+- `MAX_WIDTH` - Maximum output image width. Set to `0` to preserve original dimensions. Default: `2560`.
 - `JPEG_QUALITY` - JPEG output quality, 1 through 100. Default: `82`.
 - `WEBP_QUALITY` - WebP output quality, 1 through 100. Default: `82`.
 - `AVIF_ENABLED` - Encode supported source images to AVIF optimized objects instead of WebP. Default: `false`.
