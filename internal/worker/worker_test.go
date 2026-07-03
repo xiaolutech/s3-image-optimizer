@@ -470,6 +470,44 @@ func TestWorkerWritesSkipMarkerForUndecodableSupportedSource(t *testing.T) {
 	}
 }
 
+func TestWorkerRunScanRoundWritesSkipMarkerForWebPUnsupportedDimensions(t *testing.T) {
+	store := newFakeStore()
+	body := tallJPEG(t)
+	source := storage.ObjectInfo{
+		Key:         "notes/tall.jpg",
+		Size:        int64(len(body)),
+		ETag:        "tall-jpeg-etag",
+		ContentType: "image/jpeg",
+	}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+
+	cfg := testWorkerConfig()
+	cfg.MinBytes = 0
+	w := New(store, cfg)
+
+	result, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("RunScanRound failed: %v", err)
+	}
+	if result.Processed != 1 {
+		t.Fatalf("expected one counted object, got %d", result.Processed)
+	}
+
+	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
+	if marker.SourceKey != source.Key {
+		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
+	}
+	if marker.SourceETag != source.ETag {
+		t.Fatalf("expected source etag %q, got %q", source.ETag, marker.SourceETag)
+	}
+	if marker.Reason != "unsupported_dimensions" {
+		t.Fatalf("expected unsupported_dimensions, got %q", marker.Reason)
+	}
+	if _, ok := store.objects[objKey("optimized", "notes/tall.webp")]; ok {
+		t.Fatal("did not expect optimized WebP object for unsupported dimensions")
+	}
+}
+
 func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
@@ -954,6 +992,11 @@ func testAVIFWorkerConfig() Config {
 func largeJPEG(t *testing.T) []byte {
 	t.Helper()
 	return encodeJPEG(t, noisyImage(3000, 1200), 95)
+}
+
+func tallJPEG(t *testing.T) []byte {
+	t.Helper()
+	return encodeJPEG(t, solidImage(1, 16384), 82)
 }
 
 func smallJPEG(t *testing.T) []byte {

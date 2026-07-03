@@ -18,6 +18,8 @@ const (
 	ContentTypePNG  = "image/png"
 	ContentTypeAVIF = "image/avif"
 	ContentTypeWEBP = "image/webp"
+
+	webPMaxDimension = 16383
 )
 
 type Options struct {
@@ -90,6 +92,13 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 		encoded, err = encodeAVIF(img, opts, targetBytes, enforceTarget)
 	} else {
 		outputContentType = ContentTypeWEBP
+		if !isSupportedWebPDimension(width, height) {
+			result := skipped("unsupported_dimensions")
+			result.Width = width
+			result.Height = height
+			result.ContentType = outputContentType
+			return result, nil
+		}
 		encoded, err = encodeWebP(img, opts)
 	}
 	if err != nil {
@@ -155,6 +164,10 @@ func scaledHeight(width, height, maxWidth int) int {
 		return 1
 	}
 	return scaled
+}
+
+func isSupportedWebPDimension(width, height int) bool {
+	return width > 0 && height > 0 && width <= webPMaxDimension && height <= webPMaxDimension
 }
 
 func resize(src image.Image, width, height int) image.Image {

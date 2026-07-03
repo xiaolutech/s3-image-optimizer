@@ -152,6 +152,26 @@ func TestOptimizeSkipsUndecodableSupportedContent(t *testing.T) {
 	}
 }
 
+func TestOptimizeWebPSkipsDimensionsOutsideEncoderLimit(t *testing.T) {
+	input := encodeJPEG(t, solidImage(1, 16384), 82)
+
+	result, err := Optimize(input, "image/jpeg", Options{
+		MaxWidth:    0,
+		JPEGQuality: 82,
+		WebPQuality: 82,
+		MinSavings:  0.05,
+	})
+	if err != nil {
+		t.Fatalf("Optimize failed: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("expected unsupported WebP dimensions to be skipped")
+	}
+	if result.Reason != "unsupported_dimensions" {
+		t.Fatalf("expected unsupported_dimensions, got %q", result.Reason)
+	}
+}
+
 func TestOptimizeSkipsInsufficientSavings(t *testing.T) {
 	input := encodeJPEG(t, gradientImage(200, 100), 82)
 
@@ -337,6 +357,16 @@ func noisyImage(width, height int) image.Image {
 				B: uint8(state >> 8),
 				A: 255,
 			})
+		}
+	}
+	return img
+}
+
+func solidImage(width, height int) image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: 128, G: 64, B: 32, A: 255})
 		}
 	}
 	return img
