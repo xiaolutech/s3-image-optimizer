@@ -616,11 +616,11 @@ func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	if store.listBucket != "source" {
 		t.Fatalf("expected list bucket source, got %q", store.listBucket)
 	}
-	if _, ok := store.objects[objKey("optimized", "a.webp")]; !ok {
-		t.Fatal("expected a.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected a.jpg.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "b.webp")]; !ok {
-		t.Fatal("expected b.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("b.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected b.jpg.webp optimized object")
 	}
 }
 
@@ -644,8 +644,8 @@ func TestWorkerRunOnceRetriesTransientListErrors(t *testing.T) {
 	if store.listCalls != 3 {
 		t.Fatalf("expected 3 list attempts, got %d", store.listCalls)
 	}
-	if _, ok := store.objects[objKey("optimized", "photo.webp")]; !ok {
-		t.Fatal("expected photo.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("photo.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected photo.jpg.webp optimized object")
 	}
 }
 
@@ -653,7 +653,7 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
 	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
-	store.headErrors[objKey("optimized", "photo.webp")] = errors.New("optimized head failed")
+	store.headErrors[objKey("optimized", optimizedVariantKey("photo.jpg", webpVariantFormat))] = errors.New("optimized head failed")
 
 	cfg := testWorkerConfig()
 	cfg.ScanRetryAttempts = 3
@@ -698,14 +698,14 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	if first.LastKey != "b.jpg" {
 		t.Fatalf("expected first last key b.jpg, got %q", first.LastKey)
 	}
-	if _, ok := store.objects[objKey("optimized", "a.webp")]; !ok {
-		t.Fatal("expected a.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected a.jpg.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "b.webp")]; !ok {
-		t.Fatal("expected b.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("b.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected b.jpg.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "c.webp")]; ok {
-		t.Fatal("did not expect c.webp to be processed in first batch")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; ok {
+		t.Fatal("did not expect c.jpg.webp to be processed in first batch")
 	}
 
 	second, err := w.RunScanRound(context.Background())
@@ -718,8 +718,8 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	if second.LastKey != "c.jpg" {
 		t.Fatalf("expected second last key c.jpg, got %q", second.LastKey)
 	}
-	if _, ok := store.objects[objKey("optimized", "c.webp")]; !ok {
-		t.Fatal("expected c.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected c.jpg.webp optimized object")
 	}
 	if store.listStartAfterCalls[0] != "" {
 		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
@@ -740,8 +740,8 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 			ContentType: "image/jpeg",
 		}, body: body}
 	}
-	store.objects[objKey("optimized", "a.webp")] = fakeObject{info: storage.ObjectInfo{
-		Key:         "a.webp",
+	store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))] = fakeObject{info: storage.ObjectInfo{
+		Key:         optimizedVariantKey("a.jpg", webpVariantFormat),
 		Size:        100,
 		ETag:        "a.jpg-optimized-etag",
 		ContentType: "image/webp",
@@ -780,11 +780,11 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 	if result.HasMore {
 		t.Fatal("expected scan round to reach bucket end")
 	}
-	if _, ok := store.objects[objKey("optimized", "c.webp")]; !ok {
-		t.Fatal("expected c.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected c.jpg.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "d.webp")]; !ok {
-		t.Fatal("expected d.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("d.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected d.jpg.webp optimized object")
 	}
 	if store.getCalls != 2 {
 		t.Fatalf("expected only c.jpg and d.jpg source gets, got %d", store.getCalls)

@@ -13,8 +13,13 @@ permissions:
   packages: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-platform:
+    name: build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"platform":"linux/amd64","runner":"ubuntu-latest","cache-scope":"linux-amd64"}]' || '[{"platform":"linux/amd64","runner":"ubuntu-latest","cache-scope":"linux-amd64"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","cache-scope":"linux-arm64"}]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,30 +40,93 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/xiaolutech/s3-image-optimizer
+
+      - name: Build
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: false
+          outputs: ${{ github.event_name != 'pull_request' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || '' }}
+          tags: ghcr.io/xiaolutech/s3-image-optimizer
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.cache-scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache-scope }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.cache-scope }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build-platform
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    outputs:
+      digest: ${{ steps.inspect.outputs.digest }}
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/xiaolutech/s3-image-optimizer
           tags: |
             type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/xiaolutech/s3-image-optimizer@sha256:%s ' *)
+
+      - name: Inspect manifest
+        id: inspect
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          first_tag="$(printf '%s\n' "$TAGS" | head -n1)"
+          digest="$(docker buildx imagetools inspect "$first_tag" --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Update my-services image ref
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         uses: xiaolutech/dispatch-my-services-image-ref@v1
         with:
           token: ${{ secrets.MY_SERVICES_DISPATCH_TOKEN }}
           target: s3-image-optimizer
-          image-digest: ${{ steps.build.outputs.digest }}
+          image-digest: ${{ steps.inspect.outputs.digest }}
           source-repo: ${{ github.repository }}
           source-sha: ${{ github.sha }}
