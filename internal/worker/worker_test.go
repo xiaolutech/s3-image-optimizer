@@ -76,6 +76,39 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 	}
 }
 
+func TestAVIFOptimizedObjectContractVector(t *testing.T) {
+	const sourceKey = "notes/photo.png"
+	const profile = "v4-avif-target1m-original"
+	const expectedKey = ".s3-image-optimizer/avif/905b8d229b111ac9fe99f099872a2fcda398a8b06005c36412154b5dd19c85f4/v4-avif-target1m-original/image.avif"
+
+	if got := avifOptimizedKey(sourceKey, profile); got != expectedKey {
+		t.Fatalf("unexpected AVIF optimized key:\n got: %s\nwant: %s", got, expectedKey)
+	}
+
+	expectedMetadataKeys := []string{
+		"source-key",
+		"source-etag",
+		"optimization-profile",
+		"source-content-type",
+		"variant-format",
+	}
+	actualMetadataKeys := []string{
+		sourceKeyMetadata,
+		sourceETagMetadata,
+		profileMetadata,
+		sourceContentTypeMetadata,
+		variantFormatMetadata,
+	}
+	for i := range expectedMetadataKeys {
+		if actualMetadataKeys[i] != expectedMetadataKeys[i] {
+			t.Fatalf("metadata key %d = %q, want %q", i, actualMetadataKeys[i], expectedMetadataKeys[i])
+		}
+	}
+	if avifVariantFormat != "avif" {
+		t.Fatalf("variant format = %q, want avif", avifVariantFormat)
+	}
+}
+
 func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
