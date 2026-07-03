@@ -25,7 +25,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.OptimizedBucket != "" {
 		t.Fatalf("expected empty optimized bucket, got %q", cfg.OptimizedBucket)
 	}
-	if cfg.OptimizationProfile != "v2-jpeg82-png-best-original-width" {
+	if cfg.OptimizationProfile != "v6-webp-q82-original" {
 		t.Fatalf("unexpected profile %q", cfg.OptimizationProfile)
 	}
 	if cfg.MaxWidth != 0 {
@@ -33,6 +33,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.JPEGQuality != 82 {
 		t.Fatalf("expected jpeg quality 82, got %d", cfg.JPEGQuality)
+	}
+	if cfg.WebPQuality != 82 {
+		t.Fatalf("expected webp quality 82, got %d", cfg.WebPQuality)
 	}
 	if cfg.MinBytes != 512*1024 {
 		t.Fatalf("expected min bytes 524288, got %d", cfg.MinBytes)
@@ -91,6 +94,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("OPTIMIZATION_PROFILE", "v2-jpeg76-w2560")
 	t.Setenv("MAX_WIDTH", "2560")
 	t.Setenv("JPEG_QUALITY", "76")
+	t.Setenv("WEBP_QUALITY", "80")
 	t.Setenv("MIN_BYTES", "262144")
 	t.Setenv("AVIF_ENABLED", "true")
 	t.Setenv("AVIF_TARGET_BYTES", "786432")
@@ -126,7 +130,7 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.OptimizationProfile != "v2-jpeg76-w2560" {
 		t.Fatalf("unexpected profile %q", cfg.OptimizationProfile)
 	}
-	if cfg.MaxWidth != 2560 || cfg.JPEGQuality != 76 || cfg.MinBytes != 262144 {
+	if cfg.MaxWidth != 2560 || cfg.JPEGQuality != 76 || cfg.WebPQuality != 80 || cfg.MinBytes != 262144 {
 		t.Fatalf("unexpected optimization config: %#v", cfg)
 	}
 	if !cfg.AVIFEnabled {
@@ -217,6 +221,16 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			name:      "invalid jpeg quality high",
 			mutate:    func(cfg *Config) { cfg.JPEGQuality = 101 },
 			wantError: "JPEG_QUALITY",
+		},
+		{
+			name:      "invalid webp quality low",
+			mutate:    func(cfg *Config) { cfg.WebPQuality = 0 },
+			wantError: "WEBP_QUALITY",
+		},
+		{
+			name:      "invalid webp quality high",
+			mutate:    func(cfg *Config) { cfg.WebPQuality = 101 },
+			wantError: "WEBP_QUALITY",
 		},
 		{
 			name:      "negative min bytes",
@@ -320,6 +334,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid bool", key: "S3_USE_SSL", val: "not-bool"},
 		{name: "invalid max width", key: "MAX_WIDTH", val: "wide"},
 		{name: "invalid jpeg quality", key: "JPEG_QUALITY", val: "high"},
+		{name: "invalid webp quality", key: "WEBP_QUALITY", val: "high"},
 		{name: "invalid min bytes", key: "MIN_BYTES", val: "many"},
 		{name: "invalid AVIF enabled", key: "AVIF_ENABLED", val: "sometimes"},
 		{name: "invalid AVIF target bytes", key: "AVIF_TARGET_BYTES", val: "many"},
@@ -386,6 +401,7 @@ func clearEnv(t *testing.T) {
 		"OPTIMIZATION_PROFILE",
 		"MAX_WIDTH",
 		"JPEG_QUALITY",
+		"WEBP_QUALITY",
 		"MIN_BYTES",
 		"AVIF_ENABLED",
 		"AVIF_TARGET_BYTES",

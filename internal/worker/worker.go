@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +24,7 @@ const (
 	sourceContentTypeMetadata = "source-content-type"
 	variantFormatMetadata     = "variant-format"
 	avifVariantFormat         = "avif"
+	webpVariantFormat         = "webp"
 
 	headObjectTimeout    = 45 * time.Second
 	getObjectTimeout     = 120 * time.Second
@@ -43,6 +46,7 @@ type Config struct {
 	OptimizationProfile   string
 	MaxWidth              int
 	JPEGQuality           int
+	WebPQuality           int
 	AVIFEnabled           bool
 	AVIFTargetBytes       int64
 	AVIFQualityMin        int
@@ -194,10 +198,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		return false, err
 	}
 
-	optimizedKey := source.Key
-	if w.cfg.AVIFEnabled {
-		optimizedKey = avifOptimizedKey(source.Key, w.cfg.OptimizationProfile)
-	}
+	optimizedKey := optimizedVariantKey(source.Key, w.outputVariantFormat())
 	headCtx, headCancel := context.WithTimeout(ctx, headObjectTimeout)
 	defer headCancel()
 	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, optimizedKey)
@@ -260,6 +261,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	result, err := imageopt.Optimize(body, source.ContentType, imageopt.Options{
 		MaxWidth:        w.cfg.MaxWidth,
 		JPEGQuality:     w.cfg.JPEGQuality,
+		WebPQuality:     w.cfg.WebPQuality,
 		MinSavings:      0.05,
 		AVIFEnabled:     w.cfg.AVIFEnabled,
 		AVIFTargetBytes: w.cfg.AVIFTargetBytes,
@@ -280,16 +282,13 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	putCtx, putCancel := context.WithTimeout(ctx, putObjectTimeout)
 	defer putCancel()
 	metadata := map[string]string{
-		sourceETagMetadata: source.ETag,
-		profileMetadata:    w.cfg.OptimizationProfile,
+		sourceETagMetadata:        source.ETag,
+		profileMetadata:           w.cfg.OptimizationProfile,
+		sourceKeyMetadata:         source.Key,
+		sourceContentTypeMetadata: source.ContentType,
+		variantFormatMetadata:     w.outputVariantFormat(),
 	}
-	putKey := source.Key
-	if w.cfg.AVIFEnabled {
-		putKey = avifOptimizedKey(source.Key, w.cfg.OptimizationProfile)
-		metadata[sourceKeyMetadata] = source.Key
-		metadata[sourceContentTypeMetadata] = source.ContentType
-		metadata[variantFormatMetadata] = avifVariantFormat
-	}
+	putKey := optimizedVariantKey(source.Key, w.outputVariantFormat())
 	if err := w.store.PutObject(putCtx, w.cfg.OptimizedBucket, putKey, result.Body, storage.PutOptions{
 		ContentType: result.ContentType,
 		Metadata:    metadata,
@@ -363,13 +362,24 @@ func (w *Worker) isCurrentOptimizedForSource(optimized *storage.ObjectInfo, sour
 	if !isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile) {
 		return false
 	}
-	if !w.cfg.AVIFEnabled {
-		return true
-	}
-	return optimized.ContentType == imageopt.ContentTypeAVIF &&
+	return optimized.ContentType == w.outputContentType() &&
 		optimized.Metadata[sourceKeyMetadata] == source.Key &&
 		optimized.Metadata[sourceContentTypeMetadata] == source.ContentType &&
-		optimized.Metadata[variantFormatMetadata] == avifVariantFormat
+		optimized.Metadata[variantFormatMetadata] == w.outputVariantFormat()
+}
+
+func (w *Worker) outputVariantFormat() string {
+	if w.cfg.AVIFEnabled {
+		return avifVariantFormat
+	}
+	return webpVariantFormat
+}
+
+func (w *Worker) outputContentType() string {
+	if w.cfg.AVIFEnabled {
+		return imageopt.ContentTypeAVIF
+	}
+	return imageopt.ContentTypeWEBP
 }
 
 func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo, reason string) error {
@@ -408,9 +418,12 @@ func skipMarkerKey(sourceKey string) string {
 	return ".s3-image-optimizer/skips/" + hex.EncodeToString(sum[:]) + ".json"
 }
 
-func avifOptimizedKey(sourceKey, profile string) string {
-	sum := sha256.Sum256([]byte(sourceKey))
-	return ".s3-image-optimizer/avif/" + hex.EncodeToString(sum[:]) + "/" + profile + "/image.avif"
+func optimizedVariantKey(sourceKey, format string) string {
+	ext := path.Ext(sourceKey)
+	if ext == "" {
+		return sourceKey + "." + format
+	}
+	return strings.TrimSuffix(sourceKey, ext) + "." + format
 }
 
 type notFoundError interface {

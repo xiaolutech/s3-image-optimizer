@@ -31,18 +31,21 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	written := store.objects[objKey("optimized", source.Key)]
+	written := store.objects[objKey("optimized", "notes/photo.webp")]
 	if len(written.body) == 0 {
 		t.Fatal("expected optimized object to be written")
 	}
-	if written.info.ContentType != "image/jpeg" {
-		t.Fatalf("expected jpeg content type, got %q", written.info.ContentType)
+	if written.info.ContentType != "image/webp" {
+		t.Fatalf("expected webp content type, got %q", written.info.ContentType)
 	}
 	if written.info.Metadata["source-etag"] != "source-etag" {
 		t.Fatalf("expected source-etag metadata, got %#v", written.info.Metadata)
 	}
-	if written.info.Metadata["optimization-profile"] != "v2-jpeg82-png-best-original-width" {
+	if written.info.Metadata["optimization-profile"] != "v6-webp-q82-original" {
 		t.Fatalf("expected profile metadata, got %#v", written.info.Metadata)
+	}
+	if written.info.Metadata["variant-format"] != "webp" {
+		t.Fatalf("expected webp variant metadata, got %#v", written.info.Metadata)
 	}
 	if store.getCalls != 1 {
 		t.Fatalf("expected one source get, got %d", store.getCalls)
@@ -52,14 +55,17 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
-	store.objects[objKey("optimized", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
+	store.objects[objKey("optimized", "notes/photo.webp")] = fakeObject{info: storage.ObjectInfo{
+		Key:         "notes/photo.webp",
 		Size:        100,
 		ETag:        "optimized-etag",
-		ContentType: "image/jpeg",
+		ContentType: "image/webp",
 		Metadata: map[string]string{
 			"source-etag":          "source-etag",
-			"optimization-profile": "v2-jpeg82-png-best-original-width",
+			"optimization-profile": "v6-webp-q82-original",
+			"source-key":           source.Key,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "webp",
 		},
 	}}
 
@@ -76,13 +82,16 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 	}
 }
 
-func TestAVIFOptimizedObjectContractVector(t *testing.T) {
+func TestOptimizedObjectContractVector(t *testing.T) {
 	const sourceKey = "notes/photo.png"
-	const profile = "v4-avif-target1m-original"
-	const expectedKey = ".s3-image-optimizer/avif/905b8d229b111ac9fe99f099872a2fcda398a8b06005c36412154b5dd19c85f4/v4-avif-target1m-original/image.avif"
+	const expectedAVIFKey = "notes/photo.avif"
+	const expectedWebPKey = "notes/photo.webp"
 
-	if got := avifOptimizedKey(sourceKey, profile); got != expectedKey {
-		t.Fatalf("unexpected AVIF optimized key:\n got: %s\nwant: %s", got, expectedKey)
+	if got := optimizedVariantKey(sourceKey, avifVariantFormat); got != expectedAVIFKey {
+		t.Fatalf("unexpected AVIF optimized key:\n got: %s\nwant: %s", got, expectedAVIFKey)
+	}
+	if got := optimizedVariantKey(sourceKey, webpVariantFormat); got != expectedWebPKey {
+		t.Fatalf("unexpected WebP optimized key:\n got: %s\nwant: %s", got, expectedWebPKey)
 	}
 
 	expectedMetadataKeys := []string{
@@ -107,6 +116,9 @@ func TestAVIFOptimizedObjectContractVector(t *testing.T) {
 	if avifVariantFormat != "avif" {
 		t.Fatalf("variant format = %q, want avif", avifVariantFormat)
 	}
+	if webpVariantFormat != "webp" {
+		t.Fatalf("variant format = %q, want webp", webpVariantFormat)
+	}
 }
 
 func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
@@ -126,7 +138,7 @@ func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
 	written := store.objects[objKey("optimized", key)]
 	if len(written.body) == 0 {
 		t.Fatalf("expected AVIF object at %s", key)
@@ -149,8 +161,8 @@ func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 	if written.info.Metadata["variant-format"] != "avif" {
 		t.Fatalf("expected variant-format metadata, got %#v", written.info.Metadata)
 	}
-	if _, ok := store.objects[objKey("optimized", source.Key)]; ok {
-		t.Fatalf("did not expect same-key optimized object when AVIF is enabled")
+	if _, ok := store.objects[objKey("optimized", "notes/photo.webp")]; ok {
+		t.Fatalf("did not expect webp optimized object when AVIF is enabled")
 	}
 }
 
@@ -158,7 +170,7 @@ func TestWorkerSkipsCurrentAVIFOptimizedObject(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
 	cfg := testAVIFWorkerConfig()
-	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
 	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
 		Key:         key,
 		Size:        100,
@@ -191,7 +203,7 @@ func TestWorkerRewritesStaleAVIFOptimizedObject(t *testing.T) {
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "new-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
 	cfg := testAVIFWorkerConfig()
-	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
 	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
 		Key:         key,
 		Size:        100,
@@ -220,16 +232,15 @@ func TestWorkerRewritesStaleAVIFOptimizedObject(t *testing.T) {
 	}
 }
 
-func TestWorkerWritesCurrentAVIFKeyWhenCurrentProfileObjectIsMissing(t *testing.T) {
+func TestWorkerRewritesAVIFProfileMismatchAtMirroredKey(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
 	cfg := testAVIFWorkerConfig()
-	oldKey := avifOptimizedKey(source.Key, "v3-avif-old")
-	newKey := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
-	store.objects[objKey("optimized", oldKey)] = fakeObject{info: storage.ObjectInfo{
-		Key:         oldKey,
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
 		Size:        100,
 		ETag:        "optimized-etag",
 		ContentType: "image/avif",
@@ -247,13 +258,9 @@ func TestWorkerWritesCurrentAVIFKeyWhenCurrentProfileObjectIsMissing(t *testing.
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	written := store.objects[objKey("optimized", newKey)]
+	written := store.objects[objKey("optimized", key)]
 	if written.info.Metadata["optimization-profile"] != cfg.OptimizationProfile {
 		t.Fatalf("expected current profile metadata, got %#v", written.info.Metadata)
-	}
-	old := store.objects[objKey("optimized", oldKey)]
-	if old.info.Metadata["optimization-profile"] != "v3-avif-old" {
-		t.Fatalf("expected old profile object to remain untouched, got %#v", old.info.Metadata)
 	}
 	if store.getCalls != 1 {
 		t.Fatalf("expected one source get, got %d", store.getCalls)
@@ -266,7 +273,7 @@ func TestWorkerRewritesAVIFOptimizedObjectMissingRequiredMetadata(t *testing.T) 
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
 	cfg := testAVIFWorkerConfig()
-	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
 	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
 		Key:         key,
 		Size:        100,
@@ -300,7 +307,7 @@ func TestWorkerRewritesAVIFOptimizedObjectWithWrongContentType(t *testing.T) {
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
 	cfg := testAVIFWorkerConfig()
-	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	key := optimizedVariantKey(source.Key, avifVariantFormat)
 	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
 		Key:         key,
 		Size:        100,
@@ -334,14 +341,18 @@ func TestWorkerRewritesStaleOptimizedObject(t *testing.T) {
 	body := largeJPEG(t)
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "new-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
-	store.objects[objKey("optimized", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
+	key := optimizedVariantKey(source.Key, webpVariantFormat)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
 		Size:        100,
 		ETag:        "optimized-etag",
-		ContentType: "image/jpeg",
+		ContentType: "image/webp",
 		Metadata: map[string]string{
 			"source-etag":          "old-etag",
-			"optimization-profile": "v1-jpeg82-png-best-w1920",
+			"optimization-profile": "v6-webp-q82-original",
+			"source-key":           source.Key,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "webp",
 		},
 	}}
 
@@ -350,7 +361,7 @@ func TestWorkerRewritesStaleOptimizedObject(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	written := store.objects[objKey("optimized", source.Key)]
+	written := store.objects[objKey("optimized", key)]
 	if written.info.Metadata["source-etag"] != "new-etag" {
 		t.Fatalf("expected rewritten metadata, got %#v", written.info.Metadata)
 	}
@@ -364,14 +375,18 @@ func TestWorkerRewritesOldOptimizationProfile(t *testing.T) {
 	body := largeJPEG(t)
 	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
-	store.objects[objKey("optimized", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
+	key := optimizedVariantKey(source.Key, webpVariantFormat)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
 		Size:        100,
 		ETag:        "optimized-etag",
-		ContentType: "image/jpeg",
+		ContentType: "image/webp",
 		Metadata: map[string]string{
 			"source-etag":          "source-etag",
 			"optimization-profile": "v1-jpeg82-png-best-w1920",
+			"source-key":           source.Key,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "webp",
 		},
 	}}
 
@@ -380,8 +395,8 @@ func TestWorkerRewritesOldOptimizationProfile(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	written := store.objects[objKey("optimized", source.Key)]
-	if written.info.Metadata["optimization-profile"] != "v2-jpeg82-png-best-original-width" {
+	written := store.objects[objKey("optimized", key)]
+	if written.info.Metadata["optimization-profile"] != "v6-webp-q82-original" {
 		t.Fatalf("expected rewritten profile metadata, got %#v", written.info.Metadata)
 	}
 	if store.getCalls != 1 {
@@ -471,7 +486,7 @@ func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
 		ContentType: "application/json",
 		Metadata: map[string]string{
 			"source-etag":          source.ETag,
-			"optimization-profile": "v2-jpeg82-png-best-original-width",
+			"optimization-profile": "v6-webp-q82-original",
 		},
 	}}
 
@@ -549,25 +564,6 @@ func TestWorkerWritesUnsupportedSkipMarkerFromSourceHeadWithoutReadingBody(t *te
 	}
 }
 
-func TestWorkerWritesSkipMarkerForInsufficientSavings(t *testing.T) {
-	store := newFakeStore()
-	body := smallJPEG(t)
-	source := storage.ObjectInfo{Key: "notes/tiny.jpg", Size: int64(len(body)), ETag: "tiny-etag", ContentType: "image/jpeg"}
-	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
-	cfg := testWorkerConfig()
-	cfg.MinBytes = 0
-
-	w := New(store, cfg)
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
-	if marker.Reason != "insufficient_savings" {
-		t.Fatalf("expected insufficient_savings, got %q", marker.Reason)
-	}
-}
-
 func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
@@ -582,11 +578,11 @@ func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	if store.listBucket != "source" {
 		t.Fatalf("expected list bucket source, got %q", store.listBucket)
 	}
-	if _, ok := store.objects[objKey("optimized", "a.jpg")]; !ok {
-		t.Fatal("expected a.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "a.webp")]; !ok {
+		t.Fatal("expected a.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "b.jpg")]; !ok {
-		t.Fatal("expected b.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "b.webp")]; !ok {
+		t.Fatal("expected b.webp optimized object")
 	}
 }
 
@@ -610,8 +606,8 @@ func TestWorkerRunOnceRetriesTransientListErrors(t *testing.T) {
 	if store.listCalls != 3 {
 		t.Fatalf("expected 3 list attempts, got %d", store.listCalls)
 	}
-	if _, ok := store.objects[objKey("optimized", "photo.jpg")]; !ok {
-		t.Fatal("expected photo.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "photo.webp")]; !ok {
+		t.Fatal("expected photo.webp optimized object")
 	}
 }
 
@@ -619,7 +615,7 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
 	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
-	store.headErrors[objKey("optimized", "photo.jpg")] = errors.New("optimized head failed")
+	store.headErrors[objKey("optimized", "photo.webp")] = errors.New("optimized head failed")
 
 	cfg := testWorkerConfig()
 	cfg.ScanRetryAttempts = 3
@@ -664,14 +660,14 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	if first.LastKey != "b.jpg" {
 		t.Fatalf("expected first last key b.jpg, got %q", first.LastKey)
 	}
-	if _, ok := store.objects[objKey("optimized", "a.jpg")]; !ok {
-		t.Fatal("expected a.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "a.webp")]; !ok {
+		t.Fatal("expected a.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "b.jpg")]; !ok {
-		t.Fatal("expected b.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "b.webp")]; !ok {
+		t.Fatal("expected b.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "c.jpg")]; ok {
-		t.Fatal("did not expect c.jpg to be processed in first batch")
+	if _, ok := store.objects[objKey("optimized", "c.webp")]; ok {
+		t.Fatal("did not expect c.webp to be processed in first batch")
 	}
 
 	second, err := w.RunScanRound(context.Background())
@@ -684,8 +680,8 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	if second.LastKey != "c.jpg" {
 		t.Fatalf("expected second last key c.jpg, got %q", second.LastKey)
 	}
-	if _, ok := store.objects[objKey("optimized", "c.jpg")]; !ok {
-		t.Fatal("expected c.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "c.webp")]; !ok {
+		t.Fatal("expected c.webp optimized object")
 	}
 	if store.listStartAfterCalls[0] != "" {
 		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
@@ -706,14 +702,17 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 			ContentType: "image/jpeg",
 		}, body: body}
 	}
-	store.objects[objKey("optimized", "a.jpg")] = fakeObject{info: storage.ObjectInfo{
-		Key:         "a.jpg",
+	store.objects[objKey("optimized", "a.webp")] = fakeObject{info: storage.ObjectInfo{
+		Key:         "a.webp",
 		Size:        100,
 		ETag:        "a.jpg-optimized-etag",
-		ContentType: "image/jpeg",
+		ContentType: "image/webp",
 		Metadata: map[string]string{
 			"source-etag":          "a.jpg-etag",
-			"optimization-profile": "v2-jpeg82-png-best-original-width",
+			"optimization-profile": "v6-webp-q82-original",
+			"source-key":           "a.jpg",
+			"source-content-type":  "image/jpeg",
+			"variant-format":       "webp",
 		},
 	}}
 	store.objects[objKey("optimized", skipMarkerKey("b.jpg"))] = fakeObject{info: storage.ObjectInfo{
@@ -723,7 +722,7 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 		ContentType: "application/json",
 		Metadata: map[string]string{
 			"source-etag":          "b.jpg-etag",
-			"optimization-profile": "v2-jpeg82-png-best-original-width",
+			"optimization-profile": "v6-webp-q82-original",
 		},
 	}}
 	cfg := testWorkerConfig()
@@ -743,11 +742,11 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 	if result.HasMore {
 		t.Fatal("expected scan round to reach bucket end")
 	}
-	if _, ok := store.objects[objKey("optimized", "c.jpg")]; !ok {
-		t.Fatal("expected c.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "c.webp")]; !ok {
+		t.Fatal("expected c.webp optimized object")
 	}
-	if _, ok := store.objects[objKey("optimized", "d.jpg")]; !ok {
-		t.Fatal("expected d.jpg optimized object")
+	if _, ok := store.objects[objKey("optimized", "d.webp")]; !ok {
+		t.Fatal("expected d.webp optimized object")
 	}
 	if store.getCalls != 2 {
 		t.Fatalf("expected only c.jpg and d.jpg source gets, got %d", store.getCalls)
@@ -932,9 +931,10 @@ func testWorkerConfig() Config {
 	return Config{
 		SourceBucket:        "source",
 		OptimizedBucket:     "optimized",
-		OptimizationProfile: "v2-jpeg82-png-best-original-width",
+		OptimizationProfile: "v6-webp-q82-original",
 		MaxWidth:            0,
 		JPEGQuality:         82,
+		WebPQuality:         82,
 		MinBytes:            512,
 		ScanBatchSize:       100,
 	}

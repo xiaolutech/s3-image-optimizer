@@ -6,19 +6,25 @@ Public URL serving is intentionally out of scope. `s3-static` remains the public
 
 ## Contract With s3-static
 
-By default, this worker preserves the older same-key optimized-object mode. When `AVIF_ENABLED=true`, it writes AVIF sidecar objects to hidden keys in the optimized bucket:
+By default, this worker writes WebP sidecar objects that mirror the source bucket path and replace the file extension:
 
 ```text
-.s3-image-optimizer/avif/<sha256-source-key>/<optimization-profile>/image.avif
+notes/photo.jpg -> notes/photo.webp
 ```
 
-Every AVIF object includes:
+When `AVIF_ENABLED=true`, it writes AVIF sidecar objects with the same mirrored key rule:
+
+```text
+notes/photo.jpg -> notes/photo.avif
+```
+
+Every optimized object includes:
 
 - `x-amz-meta-source-key`
 - `x-amz-meta-source-etag`
 - `x-amz-meta-optimization-profile`
 - `x-amz-meta-source-content-type`
-- `x-amz-meta-variant-format: avif`
+- `x-amz-meta-variant-format: webp` or `avif`
 
 For a source object:
 
@@ -32,15 +38,15 @@ the worker writes:
 
 ```text
 bucket: logseq-assets-optimized
-key: .s3-image-optimizer/avif/94ce26e7.../v4-avif-target1m-original/image.avif
+key: notes/photo.webp
 x-amz-meta-source-key: notes/photo.jpg
 x-amz-meta-source-etag: abc123
-x-amz-meta-optimization-profile: v4-avif-target1m-original
+x-amz-meta-optimization-profile: v6-webp-q82-original
 x-amz-meta-source-content-type: image/jpeg
-x-amz-meta-variant-format: avif
+x-amz-meta-variant-format: webp
 ```
 
-`s3-static` uses those metadata values to decide whether the AVIF object is safe to serve. If the source ETag changes or the profile changes, `s3-static` falls back to the source object until this worker rewrites the AVIF copy.
+`s3-static` uses those metadata values to decide whether the optimized object is safe to serve. If the source ETag changes or the profile changes, `s3-static` falls back to the source object until this worker rewrites the optimized copy.
 
 ## Behavior
 
@@ -50,8 +56,8 @@ x-amz-meta-variant-format: avif
 - Supports JPEG and PNG source objects.
 - Keeps original image dimensions by default.
 - Resizes images wider than `MAX_WIDTH` only when `MAX_WIDTH` is greater than `0`.
-- Re-encodes JPEG with `JPEG_QUALITY` and PNG with best compression when AVIF is disabled.
-- Encodes supported source images to hidden AVIF sidecar objects when `AVIF_ENABLED=true`.
+- Encodes supported source images to WebP when `AVIF_ENABLED=false`.
+- Encodes supported source images to AVIF when `AVIF_ENABLED=true`.
 - Writes optimized objects to `OPTIMIZED_BUCKET`.
 - Skips objects smaller than `MIN_BYTES`.
 - Skips current optimized objects when metadata already matches.
@@ -67,10 +73,11 @@ x-amz-meta-variant-format: avif
 - `S3_USE_SSL` - Use HTTPS for S3. Default: `true`.
 - `SOURCE_BUCKET` - Bucket containing original objects.
 - `OPTIMIZED_BUCKET` - Bucket receiving optimized objects.
-- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v2-jpeg82-png-best-original-width`.
+- `OPTIMIZATION_PROFILE` - Metadata profile value. Default: `v6-webp-q82-original`.
 - `MAX_WIDTH` - Maximum output image width. Set to `0` to preserve original dimensions. Default: `0`.
 - `JPEG_QUALITY` - JPEG output quality, 1 through 100. Default: `82`.
-- `AVIF_ENABLED` - Encode supported source images to hidden AVIF optimized objects. Default: `false`.
+- `WEBP_QUALITY` - WebP output quality, 1 through 100. Default: `82`.
+- `AVIF_ENABLED` - Encode supported source images to AVIF optimized objects instead of WebP. Default: `false`.
 - `AVIF_TARGET_BYTES` - Target AVIF output size. Set to `0` to disable target-size search. Default: `1048576`.
 - `AVIF_QUALITY_MIN` - Lowest AVIF quality considered during search. Default: `35`.
 - `AVIF_QUALITY_MAX` - Highest AVIF quality considered during search. Default: `75`.

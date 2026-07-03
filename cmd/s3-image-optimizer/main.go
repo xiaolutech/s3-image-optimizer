@@ -39,6 +39,7 @@ func main() {
 		OptimizationProfile:   cfg.OptimizationProfile,
 		MaxWidth:              cfg.MaxWidth,
 		JPEGQuality:           cfg.JPEGQuality,
+		WebPQuality:           cfg.WebPQuality,
 		AVIFEnabled:           cfg.AVIFEnabled,
 		AVIFTargetBytes:       cfg.AVIFTargetBytes,
 		AVIFQualityMin:        cfg.AVIFQualityMin,

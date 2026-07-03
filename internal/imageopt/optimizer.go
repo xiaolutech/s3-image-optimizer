@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"strings"
 
+	"github.com/chai2010/webp"
 	avif "github.com/gen2brain/avif"
 	"golang.org/x/image/draw"
 )
@@ -16,11 +17,13 @@ const (
 	ContentTypeJPEG = "image/jpeg"
 	ContentTypePNG  = "image/png"
 	ContentTypeAVIF = "image/avif"
+	ContentTypeWEBP = "image/webp"
 )
 
 type Options struct {
 	MaxWidth        int
 	JPEGQuality     int
+	WebPQuality     int
 	MinSavings      float64
 	AVIFEnabled     bool
 	AVIFTargetBytes int64
@@ -61,6 +64,8 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 		if err := validateAVIFOptions(opts); err != nil {
 			return Result{}, err
 		}
+	} else if opts.webpQuality() < 1 || opts.webpQuality() > 100 {
+		return Result{}, fmt.Errorf("webp quality must be between 1 and 100")
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
@@ -84,7 +89,8 @@ func Optimize(body []byte, contentType string, opts Options) (Result, error) {
 		targetBytes, enforceTarget := avifSearchTarget(opts)
 		encoded, err = encodeAVIF(img, opts, targetBytes, enforceTarget)
 	} else {
-		encoded, err = encode(img, mediaType, opts)
+		outputContentType = ContentTypeWEBP
+		encoded, err = encodeWebP(img, opts)
 	}
 	if err != nil {
 		return Result{}, err
@@ -173,6 +179,21 @@ func encode(img image.Image, contentType string, opts Options) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported content type %q", contentType)
 	}
 	return buf.Bytes(), nil
+}
+
+func encodeWebP(img image.Image, opts Options) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := webp.Encode(&buf, img, &webp.Options{Quality: float32(opts.webpQuality())}); err != nil {
+		return nil, fmt.Errorf("encode webp: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func (opts Options) webpQuality() int {
+	if opts.WebPQuality == 0 {
+		return opts.JPEGQuality
+	}
+	return opts.WebPQuality
 }
 
 func avifSearchTarget(opts Options) (int64, bool) {

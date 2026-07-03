@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -tags nodynamic -a -installsuffix cgo -o s3-image-optimizer ./cmd/s3-image-optimizer
+RUN CGO_ENABLED=1 GOOS=linux go build -tags 'nodynamic netgo osusergo' -ldflags '-linkmode external -extldflags "-static"' -o s3-image-optimizer ./cmd/s3-image-optimizer
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app

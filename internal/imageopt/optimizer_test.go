@@ -11,9 +11,10 @@ import (
 	"testing"
 
 	_ "github.com/gen2brain/avif"
+	_ "golang.org/x/image/webp"
 )
 
-func TestOptimizeJPEGResizesAndKeepsFormat(t *testing.T) {
+func TestOptimizeJPEGResizesAndWritesWebP(t *testing.T) {
 	input := encodeJPEG(t, gradientImage(3000, 1200), 95)
 
 	result, err := Optimize(input, "image/jpeg", Options{
@@ -27,8 +28,8 @@ func TestOptimizeJPEGResizesAndKeepsFormat(t *testing.T) {
 	if result.Skipped {
 		t.Fatalf("expected optimized JPEG, skipped with %s", result.Reason)
 	}
-	if result.ContentType != "image/jpeg" {
-		t.Fatalf("expected image/jpeg, got %q", result.ContentType)
+	if result.ContentType != "image/webp" {
+		t.Fatalf("expected image/webp, got %q", result.ContentType)
 	}
 	if result.Width != 1920 {
 		t.Fatalf("expected width 1920, got %d", result.Width)
@@ -38,17 +39,17 @@ func TestOptimizeJPEGResizesAndKeepsFormat(t *testing.T) {
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(result.Body))
 	if err != nil {
-		t.Fatalf("decode optimized jpeg: %v", err)
+		t.Fatalf("decode optimized webp: %v", err)
 	}
-	if format != "jpeg" {
-		t.Fatalf("expected jpeg format, got %s", format)
+	if format != "webp" {
+		t.Fatalf("expected webp format, got %s", format)
 	}
 	if cfg.Width != 1920 || cfg.Height != 768 {
 		t.Fatalf("unexpected decoded dimensions %dx%d", cfg.Width, cfg.Height)
 	}
 }
 
-func TestOptimizePNGResizesAndKeepsFormat(t *testing.T) {
+func TestOptimizePNGResizesAndWritesWebP(t *testing.T) {
 	input := encodePNG(t, noisyImage(2400, 1000))
 
 	result, err := Optimize(input, "image/png", Options{
@@ -62,8 +63,8 @@ func TestOptimizePNGResizesAndKeepsFormat(t *testing.T) {
 	if result.Skipped {
 		t.Fatalf("expected optimized PNG, skipped with %s", result.Reason)
 	}
-	if result.ContentType != "image/png" {
-		t.Fatalf("expected image/png, got %q", result.ContentType)
+	if result.ContentType != "image/webp" {
+		t.Fatalf("expected image/webp, got %q", result.ContentType)
 	}
 	if result.Width != 1920 {
 		t.Fatalf("expected width 1920, got %d", result.Width)
@@ -73,10 +74,10 @@ func TestOptimizePNGResizesAndKeepsFormat(t *testing.T) {
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(result.Body))
 	if err != nil {
-		t.Fatalf("decode optimized png: %v", err)
+		t.Fatalf("decode optimized webp: %v", err)
 	}
-	if format != "png" {
-		t.Fatalf("expected png format, got %s", format)
+	if format != "webp" {
+		t.Fatalf("expected webp format, got %s", format)
 	}
 	if cfg.Width != 1920 || cfg.Height != 800 {
 		t.Fatalf("unexpected decoded dimensions %dx%d", cfg.Width, cfg.Height)
@@ -105,7 +106,7 @@ func TestOptimizeWithZeroMaxWidthKeepsOriginalDimensions(t *testing.T) {
 	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(result.Body))
 	if err != nil {
-		t.Fatalf("decode optimized jpeg: %v", err)
+		t.Fatalf("decode optimized webp: %v", err)
 	}
 	if cfg.Width != 3000 || cfg.Height != 1200 {
 		t.Fatalf("unexpected decoded dimensions %dx%d", cfg.Width, cfg.Height)

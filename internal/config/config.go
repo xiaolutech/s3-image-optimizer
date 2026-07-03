@@ -22,6 +22,7 @@ type Config struct {
 	OptimizationProfile string
 	MaxWidth            int
 	JPEGQuality         int
+	WebPQuality         int
 	MinBytes            int64
 	AVIFEnabled         bool
 	AVIFTargetBytes     int64
@@ -45,9 +46,10 @@ func DefaultConfig() *Config {
 		Port:                  "8080",
 		S3Region:              "us-east-1",
 		S3UseSSL:              true,
-		OptimizationProfile:   "v2-jpeg82-png-best-original-width",
+		OptimizationProfile:   "v6-webp-q82-original",
 		MaxWidth:              0,
 		JPEGQuality:           82,
+		WebPQuality:           82,
 		MinBytes:              512 * 1024,
 		AVIFEnabled:           false,
 		AVIFTargetBytes:       1024 * 1024,
@@ -83,6 +85,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.JPEGQuality, err = getenvInt("JPEG_QUALITY", cfg.JPEGQuality); err != nil {
+		return nil, err
+	}
+	if cfg.WebPQuality, err = getenvInt("WEBP_QUALITY", cfg.WebPQuality); err != nil {
 		return nil, err
 	}
 	if cfg.MinBytes, err = getenvInt64("MIN_BYTES", cfg.MinBytes); err != nil {
@@ -160,6 +165,9 @@ func (c *Config) Validate() error {
 	}
 	if c.JPEGQuality < 1 || c.JPEGQuality > 100 {
 		return fmt.Errorf("JPEG_QUALITY must be between 1 and 100")
+	}
+	if c.WebPQuality < 1 || c.WebPQuality > 100 {
+		return fmt.Errorf("WEBP_QUALITY must be between 1 and 100")
 	}
 	if c.MinBytes < 0 {
 		return fmt.Errorf("MIN_BYTES cannot be negative")
