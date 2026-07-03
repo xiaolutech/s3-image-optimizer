@@ -118,18 +118,36 @@ func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
 	}
 
 	startAfter := w.getScanLastKey()
-	page, err := w.store.ListObjectsPage(ctx, w.cfg.SourceBucket, "", startAfter, int32(batchSize))
-	if err != nil {
-		return ScanRoundResult{}, err
-	}
-
-	result := ScanRoundResult{HasMore: page.HasMore}
-	for _, info := range page.Objects {
-		if err := w.ProcessObject(ctx, info); err != nil {
-			return result, processObjectError{err: err}
+	result := ScanRoundResult{}
+	for result.Processed < batchSize {
+		page, err := w.store.ListObjectsPage(ctx, w.cfg.SourceBucket, "", startAfter, int32(batchSize))
+		if err != nil {
+			return ScanRoundResult{}, err
 		}
-		result.Processed++
-		result.LastKey = info.Key
+		if len(page.Objects) == 0 {
+			result.HasMore = page.HasMore
+			break
+		}
+
+		result.HasMore = page.HasMore
+		for i, info := range page.Objects {
+			counted, err := w.processObject(ctx, info)
+			if err != nil {
+				return result, processObjectError{err: err}
+			}
+			if counted {
+				result.Processed++
+			}
+			result.LastKey = info.Key
+			if result.Processed >= batchSize {
+				result.HasMore = page.HasMore || i < len(page.Objects)-1
+				break
+			}
+		}
+		if !result.HasMore || result.Processed >= batchSize {
+			break
+		}
+		startAfter = result.LastKey
 	}
 
 	if result.LastKey != "" && result.HasMore {
@@ -153,63 +171,68 @@ func (e processObjectError) Unwrap() error {
 }
 
 func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) error {
+	_, err := w.processObject(ctx, source)
+	return err
+}
+
+func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (bool, error) {
 	if source.Size < w.cfg.MinBytes {
 		log.Printf("skip small object key=%s size=%d", source.Key, source.Size)
-		return nil
+		return true, nil
 	}
 
 	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
+		return false, err
 	}
 	headCtx, headCancel := context.WithTimeout(ctx, headObjectTimeout)
 	defer headCancel()
 	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, source.Key)
 	if err != nil && !isNotFound(err) {
-		return fmt.Errorf("head optimized object %s: %w", source.Key, err)
+		return false, fmt.Errorf("head optimized object %s: %w", source.Key, err)
 	}
 	if err == nil && isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile) {
 		log.Printf("skip current optimized object key=%s", source.Key)
-		return nil
+		return false, nil
 	}
 
 	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
+		return false, err
 	}
 	skipCtx, skipCancel := context.WithTimeout(ctx, headObjectTimeout)
 	defer skipCancel()
 	skipMarker, err := w.store.HeadObject(skipCtx, w.cfg.OptimizedBucket, skipMarkerKey(source.Key))
 	if err != nil && !isNotFound(err) {
-		return fmt.Errorf("head skip marker %s: %w", source.Key, err)
+		return false, fmt.Errorf("head skip marker %s: %w", source.Key, err)
 	}
 	if err == nil && isCurrentOptimized(skipMarker, source, w.cfg.OptimizationProfile) {
 		log.Printf("skip current skip marker key=%s", source.Key)
-		return nil
+		return false, nil
 	}
 
 	if source.ContentType == "" {
 		if err := w.waitForRequestDelay(ctx); err != nil {
-			return err
+			return false, err
 		}
 		sourceCtx, sourceCancel := context.WithTimeout(ctx, headObjectTimeout)
 		defer sourceCancel()
 		sourceInfo, err := w.store.HeadObject(sourceCtx, w.cfg.SourceBucket, source.Key)
 		if err != nil {
-			return fmt.Errorf("head source object %s: %w", source.Key, err)
+			return false, fmt.Errorf("head source object %s: %w", source.Key, err)
 		}
 		source = *sourceInfo
 	}
 	if !imageopt.IsSupportedContentType(source.ContentType) {
-		return w.writeSkipMarker(ctx, source, "unsupported_content_type")
+		return true, w.writeSkipMarker(ctx, source, "unsupported_content_type")
 	}
 
 	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
+		return false, err
 	}
 	getCtx, getCancel := context.WithTimeout(ctx, getObjectTimeout)
 	defer getCancel()
 	body, sourceInfo, err := w.store.GetObject(getCtx, w.cfg.SourceBucket, source.Key)
 	if err != nil {
-		return fmt.Errorf("get source object %s: %w", source.Key, err)
+		return false, fmt.Errorf("get source object %s: %w", source.Key, err)
 	}
 	if sourceInfo != nil {
 		source = *sourceInfo
@@ -221,14 +244,14 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 		MinSavings:  0.05,
 	})
 	if err != nil {
-		return fmt.Errorf("optimize %s: %w", source.Key, err)
+		return false, fmt.Errorf("optimize %s: %w", source.Key, err)
 	}
 	if result.Skipped {
-		return w.writeSkipMarker(ctx, source, result.Reason)
+		return true, w.writeSkipMarker(ctx, source, result.Reason)
 	}
 
 	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
+		return false, err
 	}
 	putCtx, putCancel := context.WithTimeout(ctx, putObjectTimeout)
 	defer putCancel()
@@ -239,10 +262,10 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 			profileMetadata:    w.cfg.OptimizationProfile,
 		},
 	}); err != nil {
-		return fmt.Errorf("put optimized object %s: %w", source.Key, err)
+		return false, fmt.Errorf("put optimized object %s: %w", source.Key, err)
 	}
 	log.Printf("optimized object key=%s source_etag=%s", source.Key, source.ETag)
-	return nil
+	return true, nil
 }
 
 func (w *Worker) waitForRequestDelay(ctx context.Context) error {

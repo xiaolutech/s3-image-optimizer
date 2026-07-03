@@ -61,7 +61,7 @@ x-amz-meta-optimization-profile: v2-jpeg82-png-best-original-width
 - `MIN_BYTES` - Minimum source object size before optimization. Default: `524288`.
 - `SCAN_ENABLED` - Enable resident bounded scan rounds. Default: `false`.
 - `SCAN_INTERVAL` - Delay between resident scan rounds when `SCAN_ENABLED=true`. Default: `24h`.
-- `SCAN_BATCH_SIZE` - Maximum number of source objects listed and processed per resident scan round. This is an object count, not a byte limit. Default: `100`.
+- `SCAN_BATCH_SIZE` - Maximum counted source objects per resident scan round. Current optimized objects and current skip markers advance the scan cursor without counting toward this limit. This is an object count, not a byte limit. Default: `100`.
 - `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
 - `SCAN_RETRY_ATTEMPTS` - Whole-scan retry attempts after a failed scan, including the first attempt. Set to `1` to disable scan retries. Default: `8`.
 - `SCAN_RETRY_INITIAL_DELAY` - Initial whole-scan retry delay. Default: `5s`.

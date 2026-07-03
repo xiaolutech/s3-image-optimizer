@@ -405,6 +405,74 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	}
 }
 
+func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	for _, key := range []string{"a.jpg", "b.jpg", "c.jpg", "d.jpg"} {
+		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
+			Key:         key,
+			Size:        int64(len(body)),
+			ETag:        key + "-etag",
+			ContentType: "image/jpeg",
+		}, body: body}
+	}
+	store.objects[objKey("optimized", "a.jpg")] = fakeObject{info: storage.ObjectInfo{
+		Key:         "a.jpg",
+		Size:        100,
+		ETag:        "a.jpg-optimized-etag",
+		ContentType: "image/jpeg",
+		Metadata: map[string]string{
+			"source-etag":          "a.jpg-etag",
+			"optimization-profile": "v2-jpeg82-png-best-original-width",
+		},
+	}}
+	store.objects[objKey("optimized", skipMarkerKey("b.jpg"))] = fakeObject{info: storage.ObjectInfo{
+		Key:         skipMarkerKey("b.jpg"),
+		Size:        100,
+		ETag:        "b.jpg-skip-etag",
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"source-etag":          "b.jpg-etag",
+			"optimization-profile": "v2-jpeg82-png-best-original-width",
+		},
+	}}
+	cfg := testWorkerConfig()
+	cfg.ScanBatchSize = 2
+
+	w := New(store, cfg)
+	result, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("RunScanRound failed: %v", err)
+	}
+	if result.Processed != 2 {
+		t.Fatalf("expected two counted processed objects, got %d", result.Processed)
+	}
+	if result.LastKey != "d.jpg" {
+		t.Fatalf("expected last key d.jpg, got %q", result.LastKey)
+	}
+	if result.HasMore {
+		t.Fatal("expected scan round to reach bucket end")
+	}
+	if _, ok := store.objects[objKey("optimized", "c.jpg")]; !ok {
+		t.Fatal("expected c.jpg optimized object")
+	}
+	if _, ok := store.objects[objKey("optimized", "d.jpg")]; !ok {
+		t.Fatal("expected d.jpg optimized object")
+	}
+	if store.getCalls != 2 {
+		t.Fatalf("expected only c.jpg and d.jpg source gets, got %d", store.getCalls)
+	}
+	if len(store.listStartAfterCalls) != 2 {
+		t.Fatalf("expected two paged list calls, got %d", len(store.listStartAfterCalls))
+	}
+	if store.listStartAfterCalls[0] != "" {
+		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
+	}
+	if store.listStartAfterCalls[1] != "b.jpg" {
+		t.Fatalf("expected second list to start after b.jpg, got %q", store.listStartAfterCalls[1])
+	}
+}
+
 type fakeObject struct {
 	info storage.ObjectInfo
 	body []byte
