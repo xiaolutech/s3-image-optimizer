@@ -16,8 +16,12 @@ import (
 )
 
 const (
-	sourceETagMetadata = "source-etag"
-	profileMetadata    = "optimization-profile"
+	sourceKeyMetadata         = "source-key"
+	sourceETagMetadata        = "source-etag"
+	profileMetadata           = "optimization-profile"
+	sourceContentTypeMetadata = "source-content-type"
+	variantFormatMetadata     = "variant-format"
+	avifVariantFormat         = "avif"
 
 	headObjectTimeout    = 45 * time.Second
 	getObjectTimeout     = 120 * time.Second
@@ -39,6 +43,11 @@ type Config struct {
 	OptimizationProfile   string
 	MaxWidth              int
 	JPEGQuality           int
+	AVIFEnabled           bool
+	AVIFTargetBytes       int64
+	AVIFQualityMin        int
+	AVIFQualityMax        int
+	AVIFSpeed             int
 	MinBytes              int64
 	ProcessDelay          time.Duration
 	ScanBatchSize         int
@@ -184,14 +193,20 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	if err := w.waitForRequestDelay(ctx); err != nil {
 		return false, err
 	}
+
+	optimizedKey := source.Key
+	if w.cfg.AVIFEnabled {
+		optimizedKey = avifOptimizedKey(source.Key, w.cfg.OptimizationProfile)
+	}
 	headCtx, headCancel := context.WithTimeout(ctx, headObjectTimeout)
 	defer headCancel()
-	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, source.Key)
+	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, optimizedKey)
 	if err != nil && !isNotFound(err) {
-		return false, fmt.Errorf("head optimized object %s: %w", source.Key, err)
+		return false, fmt.Errorf("head optimized object %s: %w", optimizedKey, err)
 	}
-	if err == nil && isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile) {
-		log.Printf("skip current optimized object key=%s", source.Key)
+	optimizedFound := err == nil
+	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
+		log.Printf("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
 		return false, nil
 	}
 
@@ -221,6 +236,10 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		}
 		source = *sourceInfo
 	}
+	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
+		log.Printf("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
+		return false, nil
+	}
 	if !imageopt.IsSupportedContentType(source.ContentType) {
 		return true, w.writeSkipMarker(ctx, source, "unsupported_content_type")
 	}
@@ -239,9 +258,14 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	}
 
 	result, err := imageopt.Optimize(body, source.ContentType, imageopt.Options{
-		MaxWidth:    w.cfg.MaxWidth,
-		JPEGQuality: w.cfg.JPEGQuality,
-		MinSavings:  0.05,
+		MaxWidth:        w.cfg.MaxWidth,
+		JPEGQuality:     w.cfg.JPEGQuality,
+		MinSavings:      0.05,
+		AVIFEnabled:     w.cfg.AVIFEnabled,
+		AVIFTargetBytes: w.cfg.AVIFTargetBytes,
+		AVIFQualityMin:  w.cfg.AVIFQualityMin,
+		AVIFQualityMax:  w.cfg.AVIFQualityMax,
+		AVIFSpeed:       w.cfg.AVIFSpeed,
 	})
 	if err != nil {
 		return false, fmt.Errorf("optimize %s: %w", source.Key, err)
@@ -255,16 +279,24 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	}
 	putCtx, putCancel := context.WithTimeout(ctx, putObjectTimeout)
 	defer putCancel()
-	if err := w.store.PutObject(putCtx, w.cfg.OptimizedBucket, source.Key, result.Body, storage.PutOptions{
-		ContentType: result.ContentType,
-		Metadata: map[string]string{
-			sourceETagMetadata: source.ETag,
-			profileMetadata:    w.cfg.OptimizationProfile,
-		},
-	}); err != nil {
-		return false, fmt.Errorf("put optimized object %s: %w", source.Key, err)
+	metadata := map[string]string{
+		sourceETagMetadata: source.ETag,
+		profileMetadata:    w.cfg.OptimizationProfile,
 	}
-	log.Printf("optimized object key=%s source_etag=%s", source.Key, source.ETag)
+	putKey := source.Key
+	if w.cfg.AVIFEnabled {
+		putKey = avifOptimizedKey(source.Key, w.cfg.OptimizationProfile)
+		metadata[sourceKeyMetadata] = source.Key
+		metadata[sourceContentTypeMetadata] = source.ContentType
+		metadata[variantFormatMetadata] = avifVariantFormat
+	}
+	if err := w.store.PutObject(putCtx, w.cfg.OptimizedBucket, putKey, result.Body, storage.PutOptions{
+		ContentType: result.ContentType,
+		Metadata:    metadata,
+	}); err != nil {
+		return false, fmt.Errorf("put optimized object %s: %w", putKey, err)
+	}
+	log.Printf("optimized object key=%s optimized_key=%s source_etag=%s", source.Key, putKey, source.ETag)
 	return true, nil
 }
 
@@ -327,6 +359,19 @@ func isCurrentOptimized(optimized *storage.ObjectInfo, source storage.ObjectInfo
 		optimized.Metadata[profileMetadata] == profile
 }
 
+func (w *Worker) isCurrentOptimizedForSource(optimized *storage.ObjectInfo, source storage.ObjectInfo) bool {
+	if !isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile) {
+		return false
+	}
+	if !w.cfg.AVIFEnabled {
+		return true
+	}
+	return optimized.ContentType == imageopt.ContentTypeAVIF &&
+		optimized.Metadata[sourceKeyMetadata] == source.Key &&
+		optimized.Metadata[sourceContentTypeMetadata] == source.ContentType &&
+		optimized.Metadata[variantFormatMetadata] == avifVariantFormat
+}
+
 func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo, reason string) error {
 	marker := SkipMarker{
 		SourceKey:  source.Key,
@@ -361,6 +406,11 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 func skipMarkerKey(sourceKey string) string {
 	sum := sha256.Sum256([]byte(sourceKey))
 	return ".s3-image-optimizer/skips/" + hex.EncodeToString(sum[:]) + ".json"
+}
+
+func avifOptimizedKey(sourceKey, profile string) string {
+	sum := sha256.Sum256([]byte(sourceKey))
+	return ".s3-image-optimizer/avif/" + hex.EncodeToString(sum[:]) + "/" + profile + "/image.avif"
 }
 
 type notFoundError interface {

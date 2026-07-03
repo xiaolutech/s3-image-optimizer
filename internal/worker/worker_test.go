@@ -76,6 +76,259 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 	}
 }
 
+func TestAVIFOptimizedObjectContractVector(t *testing.T) {
+	const sourceKey = "notes/photo.png"
+	const profile = "v4-avif-target1m-original"
+	const expectedKey = ".s3-image-optimizer/avif/905b8d229b111ac9fe99f099872a2fcda398a8b06005c36412154b5dd19c85f4/v4-avif-target1m-original/image.avif"
+
+	if got := avifOptimizedKey(sourceKey, profile); got != expectedKey {
+		t.Fatalf("unexpected AVIF optimized key:\n got: %s\nwant: %s", got, expectedKey)
+	}
+
+	expectedMetadataKeys := []string{
+		"source-key",
+		"source-etag",
+		"optimization-profile",
+		"source-content-type",
+		"variant-format",
+	}
+	actualMetadataKeys := []string{
+		sourceKeyMetadata,
+		sourceETagMetadata,
+		profileMetadata,
+		sourceContentTypeMetadata,
+		variantFormatMetadata,
+	}
+	for i := range expectedMetadataKeys {
+		if actualMetadataKeys[i] != expectedMetadataKeys[i] {
+			t.Fatalf("metadata key %d = %q, want %q", i, actualMetadataKeys[i], expectedMetadataKeys[i])
+		}
+	}
+	if avifVariantFormat != "avif" {
+		t.Fatalf("variant format = %q, want avif", avifVariantFormat)
+	}
+}
+
+func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{
+		Key:         "notes/photo.jpg",
+		Size:        int64(len(body)),
+		ETag:        "source-etag",
+		ContentType: "image/jpeg",
+	}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+
+	cfg := testAVIFWorkerConfig()
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	written := store.objects[objKey("optimized", key)]
+	if len(written.body) == 0 {
+		t.Fatalf("expected AVIF object at %s", key)
+	}
+	if written.info.ContentType != "image/avif" {
+		t.Fatalf("expected image/avif, got %q", written.info.ContentType)
+	}
+	if written.info.Metadata["source-key"] != source.Key {
+		t.Fatalf("expected source-key metadata, got %#v", written.info.Metadata)
+	}
+	if written.info.Metadata["source-etag"] != source.ETag {
+		t.Fatalf("expected source-etag metadata, got %#v", written.info.Metadata)
+	}
+	if written.info.Metadata["optimization-profile"] != cfg.OptimizationProfile {
+		t.Fatalf("expected profile metadata, got %#v", written.info.Metadata)
+	}
+	if written.info.Metadata["source-content-type"] != source.ContentType {
+		t.Fatalf("expected source-content-type metadata, got %#v", written.info.Metadata)
+	}
+	if written.info.Metadata["variant-format"] != "avif" {
+		t.Fatalf("expected variant-format metadata, got %#v", written.info.Metadata)
+	}
+	if _, ok := store.objects[objKey("optimized", source.Key)]; ok {
+		t.Fatalf("did not expect same-key optimized object when AVIF is enabled")
+	}
+}
+
+func TestWorkerSkipsCurrentAVIFOptimizedObject(t *testing.T) {
+	store := newFakeStore()
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
+	cfg := testAVIFWorkerConfig()
+	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "image/avif",
+		Metadata: map[string]string{
+			"source-key":           source.Key,
+			"source-etag":          source.ETag,
+			"optimization-profile": cfg.OptimizationProfile,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "avif",
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+	if store.getCalls != 0 {
+		t.Fatalf("expected no source get, got %d", store.getCalls)
+	}
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no puts, got %#v", store.putKeys)
+	}
+}
+
+func TestWorkerRewritesStaleAVIFOptimizedObject(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "new-etag", ContentType: "image/jpeg"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+	cfg := testAVIFWorkerConfig()
+	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "image/avif",
+		Metadata: map[string]string{
+			"source-key":           source.Key,
+			"source-etag":          "old-etag",
+			"optimization-profile": cfg.OptimizationProfile,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "avif",
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	written := store.objects[objKey("optimized", key)]
+	if written.info.Metadata["source-etag"] != source.ETag {
+		t.Fatalf("expected rewritten metadata, got %#v", written.info.Metadata)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
+	}
+}
+
+func TestWorkerWritesCurrentAVIFKeyWhenCurrentProfileObjectIsMissing(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+	cfg := testAVIFWorkerConfig()
+	oldKey := avifOptimizedKey(source.Key, "v3-avif-old")
+	newKey := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	store.objects[objKey("optimized", oldKey)] = fakeObject{info: storage.ObjectInfo{
+		Key:         oldKey,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "image/avif",
+		Metadata: map[string]string{
+			"source-key":           source.Key,
+			"source-etag":          source.ETag,
+			"optimization-profile": "v3-avif-old",
+			"source-content-type":  source.ContentType,
+			"variant-format":       "avif",
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	written := store.objects[objKey("optimized", newKey)]
+	if written.info.Metadata["optimization-profile"] != cfg.OptimizationProfile {
+		t.Fatalf("expected current profile metadata, got %#v", written.info.Metadata)
+	}
+	old := store.objects[objKey("optimized", oldKey)]
+	if old.info.Metadata["optimization-profile"] != "v3-avif-old" {
+		t.Fatalf("expected old profile object to remain untouched, got %#v", old.info.Metadata)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
+	}
+}
+
+func TestWorkerRewritesAVIFOptimizedObjectMissingRequiredMetadata(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+	cfg := testAVIFWorkerConfig()
+	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "image/avif",
+		Metadata: map[string]string{
+			"source-key":           source.Key,
+			"source-etag":          source.ETag,
+			"optimization-profile": cfg.OptimizationProfile,
+			"variant-format":       "avif",
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	written := store.objects[objKey("optimized", key)]
+	if written.info.Metadata["source-content-type"] != source.ContentType {
+		t.Fatalf("expected missing metadata to be repaired, got %#v", written.info.Metadata)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
+	}
+}
+
+func TestWorkerRewritesAVIFOptimizedObjectWithWrongContentType(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(body)), ETag: "source-etag", ContentType: "image/jpeg"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
+	cfg := testAVIFWorkerConfig()
+	key := avifOptimizedKey(source.Key, cfg.OptimizationProfile)
+	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         key,
+		Size:        100,
+		ETag:        "optimized-etag",
+		ContentType: "application/octet-stream",
+		Metadata: map[string]string{
+			"source-key":           source.Key,
+			"source-etag":          source.ETag,
+			"optimization-profile": cfg.OptimizationProfile,
+			"source-content-type":  source.ContentType,
+			"variant-format":       "avif",
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	written := store.objects[objKey("optimized", key)]
+	if written.info.ContentType != "image/avif" {
+		t.Fatalf("expected wrong content type to be repaired, got %q", written.info.ContentType)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
+	}
+}
+
 func TestWorkerRewritesStaleOptimizedObject(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
@@ -229,6 +482,43 @@ func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
 
 	if store.getCalls != 0 {
 		t.Fatalf("expected no source get, got %d", store.getCalls)
+	}
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no puts, got %#v", store.putKeys)
+	}
+}
+
+func TestWorkerSkipsCurrentSkipMarkerWithoutSourceHeadWhenAVIFEnabled(t *testing.T) {
+	store := newFakeStore()
+	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
+	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
+		Key:         source.Key,
+		Size:        source.Size,
+		ETag:        source.ETag,
+		ContentType: "video/webm",
+	}, body: []byte("large video")}
+	cfg := testAVIFWorkerConfig()
+	store.objects[objKey("optimized", skipMarkerKey(source.Key))] = fakeObject{info: storage.ObjectInfo{
+		Key:         skipMarkerKey(source.Key),
+		Size:        100,
+		ETag:        "marker-etag",
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"source-etag":          source.ETag,
+			"optimization-profile": cfg.OptimizationProfile,
+		},
+	}}
+
+	w := New(store, cfg)
+	if err := w.ProcessObject(context.Background(), source); err != nil {
+		t.Fatalf("ProcessObject failed: %v", err)
+	}
+
+	if store.getCalls != 0 {
+		t.Fatalf("expected no source get, got %d", store.getCalls)
+	}
+	if store.sourceHeadCalls != 0 {
+		t.Fatalf("expected no source head, got %d", store.sourceHeadCalls)
 	}
 	if len(store.putKeys) != 0 {
 		t.Fatalf("expected no puts, got %#v", store.putKeys)
@@ -481,6 +771,7 @@ type fakeObject struct {
 type fakeStore struct {
 	objects             map[string]fakeObject
 	getCalls            int
+	sourceHeadCalls     int
 	listCalls           int
 	putKeys             []string
 	listBucket          string
@@ -498,6 +789,9 @@ func newFakeStore() *fakeStore {
 }
 
 func (s *fakeStore) HeadObject(ctx context.Context, bucket, key string) (*storage.ObjectInfo, error) {
+	if bucket == "source" {
+		s.sourceHeadCalls++
+	}
 	if err, ok := s.headErrors[objKey(bucket, key)]; ok {
 		return nil, err
 	}
@@ -644,6 +938,17 @@ func testWorkerConfig() Config {
 		MinBytes:            512,
 		ScanBatchSize:       100,
 	}
+}
+
+func testAVIFWorkerConfig() Config {
+	cfg := testWorkerConfig()
+	cfg.OptimizationProfile = "v4-avif-target1m-original"
+	cfg.AVIFEnabled = true
+	cfg.AVIFTargetBytes = 1024 * 1024
+	cfg.AVIFQualityMin = 35
+	cfg.AVIFQualityMax = 75
+	cfg.AVIFSpeed = 10
+	return cfg
 }
 
 func largeJPEG(t *testing.T) []byte {

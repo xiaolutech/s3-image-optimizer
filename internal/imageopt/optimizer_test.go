@@ -7,7 +7,10 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"strings"
 	"testing"
+
+	_ "github.com/gen2brain/avif"
 )
 
 func TestOptimizeJPEGResizesAndKeepsFormat(t *testing.T) {
@@ -164,6 +167,145 @@ func TestOptimizeSkipsInsufficientSavings(t *testing.T) {
 	}
 	if result.Reason != "insufficient_savings" {
 		t.Fatalf("expected insufficient_savings, got %q", result.Reason)
+	}
+}
+
+func TestOptimizeWithAVIFOutputPreservesDimensions(t *testing.T) {
+	input := encodePNG(t, noisyImage(640, 480))
+
+	result, err := Optimize(input, "image/png", Options{
+		MaxWidth:        0,
+		JPEGQuality:     82,
+		MinSavings:      0,
+		AVIFEnabled:     true,
+		AVIFTargetBytes: 1024 * 1024,
+		AVIFQualityMin:  35,
+		AVIFQualityMax:  75,
+		AVIFSpeed:       8,
+	})
+	if err != nil {
+		t.Fatalf("Optimize failed: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected AVIF output, skipped with %s", result.Reason)
+	}
+	if result.ContentType != "image/avif" {
+		t.Fatalf("expected image/avif, got %q", result.ContentType)
+	}
+	if result.Width != 640 || result.Height != 480 {
+		t.Fatalf("unexpected dimensions %dx%d", result.Width, result.Height)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(result.Body))
+	if err != nil {
+		t.Fatalf("decode optimized avif: %v", err)
+	}
+	if format != "avif" {
+		t.Fatalf("expected avif format, got %s", format)
+	}
+	if cfg.Width != 640 || cfg.Height != 480 {
+		t.Fatalf("unexpected decoded dimensions %dx%d", cfg.Width, cfg.Height)
+	}
+}
+
+func TestOptimizeAVIFSkipsInsufficientSavings(t *testing.T) {
+	input := encodePNG(t, gradientImage(16, 16))
+
+	result, err := Optimize(input, "image/png", Options{
+		MaxWidth:        0,
+		JPEGQuality:     82,
+		MinSavings:      0.99,
+		AVIFEnabled:     true,
+		AVIFTargetBytes: 1024,
+		AVIFQualityMin:  35,
+		AVIFQualityMax:  75,
+		AVIFSpeed:       8,
+	})
+	if err != nil {
+		t.Fatalf("Optimize failed: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("expected AVIF output to be skipped")
+	}
+	if result.Reason != "insufficient_savings" {
+		t.Fatalf("expected insufficient_savings, got %q", result.Reason)
+	}
+}
+
+func TestOptimizeAVIFOptionValidation(t *testing.T) {
+	input := encodePNG(t, gradientImage(16, 16))
+
+	tests := []struct {
+		name      string
+		mutate    func(*Options)
+		wantError string
+	}{
+		{
+			name:      "negative target bytes",
+			mutate:    func(opts *Options) { opts.AVIFTargetBytes = -1 },
+			wantError: "avif target bytes",
+		},
+		{
+			name:      "quality min below bounds",
+			mutate:    func(opts *Options) { opts.AVIFQualityMin = -1 },
+			wantError: "avif quality min",
+		},
+		{
+			name:      "quality min above bounds",
+			mutate:    func(opts *Options) { opts.AVIFQualityMin = 101 },
+			wantError: "avif quality min",
+		},
+		{
+			name:      "quality max below bounds",
+			mutate:    func(opts *Options) { opts.AVIFQualityMax = -1 },
+			wantError: "avif quality max",
+		},
+		{
+			name:      "quality max above bounds",
+			mutate:    func(opts *Options) { opts.AVIFQualityMax = 101 },
+			wantError: "avif quality max",
+		},
+		{
+			name: "quality min greater than max",
+			mutate: func(opts *Options) {
+				opts.AVIFQualityMin = 76
+				opts.AVIFQualityMax = 75
+			},
+			wantError: "avif quality min",
+		},
+		{
+			name:      "speed below bounds",
+			mutate:    func(opts *Options) { opts.AVIFSpeed = -1 },
+			wantError: "avif speed",
+		},
+		{
+			name:      "speed above bounds",
+			mutate:    func(opts *Options) { opts.AVIFSpeed = 11 },
+			wantError: "avif speed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Options{
+				MaxWidth:        0,
+				JPEGQuality:     82,
+				MinSavings:      0,
+				AVIFEnabled:     true,
+				AVIFTargetBytes: 1024,
+				AVIFQualityMin:  35,
+				AVIFQualityMax:  75,
+				AVIFSpeed:       8,
+			}
+			tt.mutate(&opts)
+
+			_, err := Optimize(input, "image/png", opts)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantError, err.Error())
+			}
+		})
 	}
 }
 
