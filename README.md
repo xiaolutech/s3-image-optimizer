@@ -86,7 +86,7 @@ x-amz-meta-variant-format: webp
 - `SCAN_ENABLED` - Enable resident bounded scan rounds. Default: `false`.
 - `SCAN_INTERVAL` - Delay between resident scan rounds while a bucket pass still has more objects when `SCAN_ENABLED=true`. Default: `24h`.
 - `SCAN_FULL_PASS_INTERVAL` - Delay after a resident scan round reaches the end of the bucket before starting over from the beginning. Default: `24h`.
-- `SCAN_BATCH_SIZE` - Maximum counted source objects per resident scan round. Current optimized objects and current skip markers advance the scan cursor without counting toward this limit. This is an object count, not a byte limit. Default: `100`.
+- `SCAN_BATCH_SIZE` - Maximum source objects inspected per resident scan round. Current optimized objects and current skip markers still consume this scan window and advance the cursor. This is an object count, not a byte limit. Default: `200`.
 - `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
 - `SCAN_RETRY_ATTEMPTS` - Whole-scan retry attempts after a failed scan, including the first attempt. Set to `1` to disable scan retries. Default: `8`.
 - `SCAN_RETRY_INITIAL_DELAY` - Initial whole-scan retry delay. Default: `5s`.

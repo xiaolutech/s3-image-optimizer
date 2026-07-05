@@ -61,7 +61,7 @@ func DefaultConfig() *Config {
 		ScanFullPassInterval:  24 * time.Hour,
 		ScanEnabled:           false,
 		ProcessDelay:          0,
-		ScanBatchSize:         100,
+		ScanBatchSize:         200,
 		ScanRetryAttempts:     8,
 		ScanRetryInitialDelay: 5 * time.Second,
 		ScanRetryMaxDelay:     2 * time.Minute,

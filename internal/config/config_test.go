@@ -67,8 +67,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ProcessDelay != 0 {
 		t.Fatalf("expected process delay 0, got %v", cfg.ProcessDelay)
 	}
-	if cfg.ScanBatchSize != 100 {
-		t.Fatalf("expected scan batch size 100, got %d", cfg.ScanBatchSize)
+	if cfg.ScanBatchSize != 200 {
+		t.Fatalf("expected scan batch size 200, got %d", cfg.ScanBatchSize)
 	}
 	if cfg.ScanRetryAttempts != 8 {
 		t.Fatalf("expected scan retry attempts 8, got %d", cfg.ScanRetryAttempts)

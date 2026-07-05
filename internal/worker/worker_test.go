@@ -729,7 +729,7 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	}
 }
 
-func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
+func TestWorkerRunScanRoundCountsCurrentObjectsTowardBatchWindow(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
 	for _, key := range []string{"a.jpg", "b.jpg", "c.jpg", "d.jpg"} {
@@ -771,32 +771,26 @@ func TestWorkerRunScanRoundDoesNotCountCurrentObjectsTowardBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunScanRound failed: %v", err)
 	}
-	if result.Processed != 2 {
-		t.Fatalf("expected two counted processed objects, got %d", result.Processed)
+	if result.Processed != 0 {
+		t.Fatalf("expected no processed objects, got %d", result.Processed)
 	}
-	if result.LastKey != "d.jpg" {
-		t.Fatalf("expected last key d.jpg, got %q", result.LastKey)
+	if result.LastKey != "b.jpg" {
+		t.Fatalf("expected last key b.jpg, got %q", result.LastKey)
 	}
-	if result.HasMore {
-		t.Fatal("expected scan round to reach bucket end")
+	if !result.HasMore {
+		t.Fatal("expected scan round to report more objects")
 	}
-	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; !ok {
-		t.Fatal("expected c.jpg.webp optimized object")
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; ok {
+		t.Fatal("did not expect c.jpg.webp to be processed in first batch window")
 	}
-	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("d.jpg", webpVariantFormat))]; !ok {
-		t.Fatal("expected d.jpg.webp optimized object")
+	if store.getCalls != 0 {
+		t.Fatalf("expected no source gets, got %d", store.getCalls)
 	}
-	if store.getCalls != 2 {
-		t.Fatalf("expected only c.jpg and d.jpg source gets, got %d", store.getCalls)
-	}
-	if len(store.listStartAfterCalls) != 2 {
-		t.Fatalf("expected two paged list calls, got %d", len(store.listStartAfterCalls))
+	if len(store.listStartAfterCalls) != 1 {
+		t.Fatalf("expected one paged list call, got %d", len(store.listStartAfterCalls))
 	}
 	if store.listStartAfterCalls[0] != "" {
 		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
-	}
-	if store.listStartAfterCalls[1] != "b.jpg" {
-		t.Fatalf("expected second list to start after b.jpg, got %q", store.listStartAfterCalls[1])
 	}
 }
 
@@ -974,7 +968,7 @@ func testWorkerConfig() Config {
 		JPEGQuality:         82,
 		WebPQuality:         82,
 		MinBytes:            512,
-		ScanBatchSize:       100,
+		ScanBatchSize:       200,
 	}
 }
 

@@ -125,13 +125,15 @@ func (w *Worker) runOnce(ctx context.Context) error {
 func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
 	batchSize := w.cfg.ScanBatchSize
 	if batchSize <= 0 {
-		batchSize = 100
+		batchSize = 200
 	}
 
 	startAfter := w.getScanLastKey()
 	result := ScanRoundResult{}
-	for result.Processed < batchSize {
-		page, err := w.store.ListObjectsPage(ctx, w.cfg.SourceBucket, "", startAfter, int32(batchSize))
+	advanced := 0
+	for advanced < batchSize {
+		remaining := batchSize - advanced
+		page, err := w.store.ListObjectsPage(ctx, w.cfg.SourceBucket, "", startAfter, int32(remaining))
 		if err != nil {
 			return ScanRoundResult{}, err
 		}
@@ -141,21 +143,18 @@ func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
 		}
 
 		result.HasMore = page.HasMore
-		for i, info := range page.Objects {
+		for _, info := range page.Objects {
 			counted, err := w.processObject(ctx, info)
 			if err != nil {
 				return result, processObjectError{err: err}
 			}
+			advanced++
 			if counted {
 				result.Processed++
 			}
 			result.LastKey = info.Key
-			if result.Processed >= batchSize {
-				result.HasMore = page.HasMore || i < len(page.Objects)-1
-				break
-			}
 		}
-		if !result.HasMore || result.Processed >= batchSize {
+		if !result.HasMore || advanced >= batchSize {
 			break
 		}
 		startAfter = result.LastKey
