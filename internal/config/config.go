@@ -30,11 +30,12 @@ type Config struct {
 	AVIFQualityMax      int
 	AVIFSpeed           int
 
-	ScanInterval  time.Duration
-	ScanEnabled   bool
-	RunOnce       bool
-	ProcessDelay  time.Duration
-	ScanBatchSize int
+	ScanInterval         time.Duration
+	ScanFullPassInterval time.Duration
+	ScanEnabled          bool
+	RunOnce              bool
+	ProcessDelay         time.Duration
+	ScanBatchSize        int
 
 	ScanRetryAttempts     int
 	ScanRetryInitialDelay time.Duration
@@ -57,6 +58,7 @@ func DefaultConfig() *Config {
 		AVIFQualityMax:        75,
 		AVIFSpeed:             6,
 		ScanInterval:          24 * time.Hour,
+		ScanFullPassInterval:  24 * time.Hour,
 		ScanEnabled:           false,
 		ProcessDelay:          0,
 		ScanBatchSize:         100,
@@ -109,6 +111,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.ScanInterval, err = getenvDuration("SCAN_INTERVAL", cfg.ScanInterval); err != nil {
+		return nil, err
+	}
+	if cfg.ScanFullPassInterval, err = getenvDuration("SCAN_FULL_PASS_INTERVAL", cfg.ScanFullPassInterval); err != nil {
 		return nil, err
 	}
 	if cfg.ScanEnabled, err = getenvBool("SCAN_ENABLED", cfg.ScanEnabled); err != nil {
@@ -189,6 +194,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ScanInterval <= 0 {
 		return fmt.Errorf("SCAN_INTERVAL must be positive")
+	}
+	if c.ScanFullPassInterval <= 0 {
+		return fmt.Errorf("SCAN_FULL_PASS_INTERVAL must be positive")
 	}
 	if c.ProcessDelay < 0 {
 		return fmt.Errorf("PROCESS_DELAY cannot be negative")

@@ -67,7 +67,7 @@ func main() {
 	}
 
 	if cfg.ScanEnabled {
-		runLoop(ctx, w, cfg.ScanInterval)
+		runLoop(ctx, w, cfg.ScanInterval, cfg.ScanFullPassInterval)
 		return
 	}
 
@@ -131,30 +131,36 @@ func shutdownHealthServer(server *http.Server) {
 	}
 }
 
-func runLoop(ctx context.Context, w *worker.Worker, interval time.Duration) {
-	runScan(ctx, w)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
+func runLoop(ctx context.Context, w *worker.Worker, interval, fullPassInterval time.Duration) {
 	for {
+		result, err := runScan(ctx, w)
+		delay := nextScanDelay(result, err, interval, fullPassInterval)
+		log.Printf("next scan scheduled in %s", delay)
+
 		select {
 		case <-ctx.Done():
 			log.Printf("shutdown requested")
 			return
-		case <-ticker.C:
-			runScan(ctx, w)
+		case <-time.After(delay):
 		}
 	}
 }
 
-func runScan(ctx context.Context, w *worker.Worker) {
+func runScan(ctx context.Context, w *worker.Worker) (worker.ScanRoundResult, error) {
 	start := time.Now()
 	log.Printf("scan started")
 	result, err := w.RunScanRound(ctx)
 	if err != nil {
 		log.Printf("scan failed: %v", err)
-		return
+		return result, err
 	}
 	log.Printf("scan completed duration=%s processed=%d last_key=%q has_more=%t", time.Since(start), result.Processed, result.LastKey, result.HasMore)
+	return result, nil
+}
+
+func nextScanDelay(result worker.ScanRoundResult, err error, interval, fullPassInterval time.Duration) time.Duration {
+	if err != nil || result.HasMore {
+		return interval
+	}
+	return fullPassInterval
 }

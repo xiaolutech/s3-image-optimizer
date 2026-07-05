@@ -58,6 +58,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ScanInterval != 24*time.Hour {
 		t.Fatalf("expected scan interval 24h, got %v", cfg.ScanInterval)
 	}
+	if cfg.ScanFullPassInterval != 24*time.Hour {
+		t.Fatalf("expected full-pass scan interval 24h, got %v", cfg.ScanFullPassInterval)
+	}
 	if cfg.ScanEnabled {
 		t.Fatal("expected scan enabled false by default")
 	}
@@ -102,6 +105,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("AVIF_QUALITY_MAX", "70")
 	t.Setenv("AVIF_SPEED", "8")
 	t.Setenv("SCAN_INTERVAL", "5m")
+	t.Setenv("SCAN_FULL_PASS_INTERVAL", "12h")
 	t.Setenv("SCAN_ENABLED", "true")
 	t.Setenv("PROCESS_DELAY", "5s")
 	t.Setenv("SCAN_BATCH_SIZE", "25")
@@ -147,6 +151,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.ScanInterval != 5*time.Minute {
 		t.Fatalf("expected scan interval 5m, got %v", cfg.ScanInterval)
+	}
+	if cfg.ScanFullPassInterval != 12*time.Hour {
+		t.Fatalf("expected full-pass scan interval 12h, got %v", cfg.ScanFullPassInterval)
 	}
 	if !cfg.ScanEnabled {
 		t.Fatal("expected scan enabled true")
@@ -283,6 +290,11 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			wantError: "SCAN_INTERVAL",
 		},
 		{
+			name:      "invalid full-pass scan interval",
+			mutate:    func(cfg *Config) { cfg.ScanFullPassInterval = 0 },
+			wantError: "SCAN_FULL_PASS_INTERVAL",
+		},
+		{
 			name:      "invalid retry attempts",
 			mutate:    func(cfg *Config) { cfg.ScanRetryAttempts = 0 },
 			wantError: "SCAN_RETRY_ATTEMPTS",
@@ -342,6 +354,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid AVIF max quality", key: "AVIF_QUALITY_MAX", val: "high"},
 		{name: "invalid AVIF speed", key: "AVIF_SPEED", val: "fast"},
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
+		{name: "invalid full-pass scan interval", key: "SCAN_FULL_PASS_INTERVAL", val: "soon"},
 		{name: "invalid scan enabled", key: "SCAN_ENABLED", val: "sometimes"},
 		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
 		{name: "invalid scan batch size", key: "SCAN_BATCH_SIZE", val: "many"},
@@ -409,6 +422,7 @@ func clearEnv(t *testing.T) {
 		"AVIF_QUALITY_MAX",
 		"AVIF_SPEED",
 		"SCAN_INTERVAL",
+		"SCAN_FULL_PASS_INTERVAL",
 		"SCAN_ENABLED",
 		"PROCESS_DELAY",
 		"SCAN_BATCH_SIZE",

@@ -50,6 +50,7 @@ services:
       AVIF_SPEED: "6"
       MIN_BYTES: "524288"
       SCAN_INTERVAL: 24h
+      SCAN_FULL_PASS_INTERVAL: 24h
       RUN_ONCE: "false"
     ports:
       - "8080:8080"
