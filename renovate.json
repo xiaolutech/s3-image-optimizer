@@ -1,6 +1,24 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
-  ]
+    "config:recommended",
+    ":automergePatch",
+    ":automergeMinor"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge indirect/dev dependency updates (minor & patch)",
+      "matchDepTypes": ["indirect", "require"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Disable automerge for major version bumps",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ],
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": true
 }
