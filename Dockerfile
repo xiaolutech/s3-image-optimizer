@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.8
+# syntax=docker/dockerfile:1.25
 FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app
