@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.1
 	github.com/aws/smithy-go v1.27.5
 	github.com/chai2010/webp v1.4.0
-	github.com/gen2brain/avif v0.5.3
+	github.com/gen2brain/avif v0.6.0
 	github.com/testcontainers/testcontainers-go v0.43.0
 	golang.org/x/image v0.43.0
 )
