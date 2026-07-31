@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiaolutech/s3-image-optimizer/internal/worker"
+	"github.com/xiaolutech/s3-image-sidecar/internal/worker"
 )
 
 func TestNextScanDelayUsesIntervalWhenRoundHasMoreObjects(t *testing.T) {

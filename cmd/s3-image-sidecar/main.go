@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xiaolutech/s3-image-optimizer/internal/config"
-	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
-	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
-	"github.com/xiaolutech/s3-image-optimizer/internal/worker"
+	"github.com/xiaolutech/s3-image-sidecar/internal/config"
+	slog "github.com/xiaolutech/s3-image-sidecar/internal/log"
+	"github.com/xiaolutech/s3-image-sidecar/internal/storage"
+	"github.com/xiaolutech/s3-image-sidecar/internal/worker"
 )
 
 var (

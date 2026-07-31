@@ -11,6 +11,6 @@ vet:
     go vet ./...
 
 build:
-    go build -o s3-image-optimizer ./cmd/s3-image-optimizer
+    go build -o s3-image-sidecar ./cmd/s3-image-sidecar
 
 validate: fmt test vet build

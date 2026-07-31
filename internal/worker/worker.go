@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xiaolutech/s3-image-optimizer/internal/imageopt"
-	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
-	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
+	"github.com/xiaolutech/s3-image-sidecar/internal/imageopt"
+	slog "github.com/xiaolutech/s3-image-sidecar/internal/log"
+	"github.com/xiaolutech/s3-image-sidecar/internal/storage"
 )
 
 const (
@@ -413,7 +413,7 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 
 func skipMarkerKey(sourceKey string) string {
 	sum := sha256.Sum256([]byte(sourceKey))
-	return ".s3-image-optimizer/skips/" + hex.EncodeToString(sum[:]) + ".json"
+	return ".s3-image-sidecar/skips/" + hex.EncodeToString(sum[:]) + ".json"
 }
 
 func optimizedVariantKey(sourceKey, format string) string {

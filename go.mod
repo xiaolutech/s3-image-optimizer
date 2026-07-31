@@ -1,4 +1,4 @@
-module github.com/xiaolutech/s3-image-optimizer
+module github.com/xiaolutech/s3-image-sidecar
 
 go 1.25.6
 

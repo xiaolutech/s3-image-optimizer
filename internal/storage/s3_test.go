@@ -15,7 +15,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/xiaolutech/s3-image-optimizer/internal/config"
+	"github.com/xiaolutech/s3-image-sidecar/internal/config"
 )
 
 func TestS3ClientObjectOperations(t *testing.T) {

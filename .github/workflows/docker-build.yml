@@ -43,7 +43,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/xiaolutech/s3-image-optimizer
+          images: ghcr.io/xiaolutech/s3-image-sidecar
 
       - name: Build
         id: build
@@ -53,7 +53,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: false
           outputs: ${{ github.event_name != 'pull_request' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || '' }}
-          tags: ghcr.io/xiaolutech/s3-image-optimizer
+          tags: ghcr.io/xiaolutech/s3-image-sidecar
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.cache-scope }}
           cache-to: type=gha,mode=max,scope=${{ matrix.cache-scope }}
@@ -102,7 +102,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/xiaolutech/s3-image-optimizer
+          images: ghcr.io/xiaolutech/s3-image-sidecar
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -114,7 +114,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/xiaolutech/s3-image-optimizer@sha256:%s ' *)
+            $(printf 'ghcr.io/xiaolutech/s3-image-sidecar@sha256:%s ' *)
 
       - name: Inspect manifest
         id: inspect
@@ -130,7 +130,7 @@ jobs:
         uses: xiaolutech/dispatch-my-services-image-ref@v1
         with:
           token: ${{ secrets.MY_SERVICES_DISPATCH_TOKEN }}
-          target: s3-image-optimizer
+          target: s3-image-sidecar
           image-digest: ${{ steps.inspect.outputs.digest }}
           source-repo: ${{ github.repository }}
           source-sha: ${{ github.sha }}

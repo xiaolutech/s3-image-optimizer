@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
-	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
+	slog "github.com/xiaolutech/s3-image-sidecar/internal/log"
+	"github.com/xiaolutech/s3-image-sidecar/internal/storage"
 )
 
 func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {

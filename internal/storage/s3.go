@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/xiaolutech/s3-image-optimizer/internal/config"
+	"github.com/xiaolutech/s3-image-sidecar/internal/config"
 )
 
 type ObjectInfo struct {

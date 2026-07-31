@@ -1,4 +1,4 @@
-# s3-image-optimizer
+# s3-image-sidecar
 
 Standalone worker that scans an S3-compatible source bucket, writes optimized image copies to a separate bucket, and tags each optimized object with source metadata that `s3-static` can verify.
 
@@ -61,7 +61,7 @@ x-amz-meta-variant-format: webp
 - Writes optimized objects to `OPTIMIZED_BUCKET`.
 - Skips objects smaller than `MIN_BYTES`.
 - Skips current optimized objects when metadata already matches.
-- Writes skip markers to `.s3-image-optimizer/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
+- Writes skip markers to `.s3-image-sidecar/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
 
 ## Configuration
 
@@ -98,7 +98,7 @@ x-amz-meta-variant-format: webp
 ```bash
 go test ./...
 go vet ./...
-go build ./cmd/s3-image-optimizer
+go build ./cmd/s3-image-sidecar
 ```
 
 With `just`:
@@ -112,13 +112,13 @@ just validate
 Build locally:
 
 ```bash
-DOCKER_BUILDKIT=1 docker build -t s3-image-optimizer:local .
+DOCKER_BUILDKIT=1 docker build -t s3-image-sidecar:local .
 ```
 
 Validate the local compose stack:
 
 ```bash
-docker compose config >/tmp/s3-image-optimizer.compose.yaml
+docker compose config >/tmp/s3-image-sidecar.compose.yaml
 ```
 
 Run MinIO plus the worker:
@@ -137,5 +137,5 @@ The local stack creates:
 The GitHub Actions workflow publishes:
 
 ```text
-ghcr.io/xiaolutech/s3-image-optimizer
+ghcr.io/xiaolutech/s3-image-sidecar
 ```
