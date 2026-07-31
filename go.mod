@@ -11,7 +11,7 @@ require (
 	github.com/chai2010/webp v1.4.0
 	github.com/gen2brain/avif v0.5.3
 	github.com/testcontainers/testcontainers-go v0.43.0
-	golang.org/x/image v0.43.0
+	golang.org/x/image v0.44.0
 )
 
 require (
