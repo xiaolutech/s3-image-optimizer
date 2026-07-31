@@ -11,8 +11,13 @@ import (
 	"time"
 
 	"github.com/xiaolutech/s3-image-optimizer/internal/config"
+	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
 	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
 	"github.com/xiaolutech/s3-image-optimizer/internal/worker"
+)
+
+var (
+	logger *slog.Logger
 )
 
 func main() {
@@ -27,6 +32,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+
+	logger = slog.New(cfg.LogLevel)
 
 	store, err := storage.New(cfg)
 	if err != nil {
@@ -51,7 +58,7 @@ func main() {
 		ScanRetryAttempts:     cfg.ScanRetryAttempts,
 		ScanRetryInitialDelay: cfg.ScanRetryInitialDelay,
 		ScanRetryMaxDelay:     cfg.ScanRetryMaxDelay,
-	})
+	}, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -71,9 +78,9 @@ func main() {
 		return
 	}
 
-	log.Printf("scan loop disabled; waiting for shutdown")
+	logger.Info("scan loop disabled; waiting for shutdown")
 	<-ctx.Done()
-	log.Printf("shutdown requested")
+	logger.Info("shutdown requested")
 }
 
 func startHealthServer(port string) *http.Server {
@@ -96,7 +103,7 @@ func startHealthServer(port string) *http.Server {
 		IdleTimeout:       30 * time.Second,
 	}
 	go func() {
-		log.Printf("health server listening on %s", server.Addr)
+		logger.Info("health server listening on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("health server: %v", err)
 		}
@@ -127,7 +134,7 @@ func shutdownHealthServer(server *http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("health server shutdown: %v", err)
+		logger.Info("health server shutdown: %v", err)
 	}
 }
 
@@ -135,11 +142,11 @@ func runLoop(ctx context.Context, w *worker.Worker, interval, fullPassInterval t
 	for {
 		result, err := runScan(ctx, w)
 		delay := nextScanDelay(result, err, interval, fullPassInterval)
-		log.Printf("next scan scheduled in %s", delay)
+		logger.Info("next scan scheduled in %s", delay)
 
 		select {
 		case <-ctx.Done():
-			log.Printf("shutdown requested")
+			logger.Info("shutdown requested")
 			return
 		case <-time.After(delay):
 		}
@@ -148,13 +155,13 @@ func runLoop(ctx context.Context, w *worker.Worker, interval, fullPassInterval t
 
 func runScan(ctx context.Context, w *worker.Worker) (worker.ScanRoundResult, error) {
 	start := time.Now()
-	log.Printf("scan started")
+	logger.Info("scan started")
 	result, err := w.RunScanRound(ctx)
 	if err != nil {
-		log.Printf("scan failed: %v", err)
+		logger.Warn("scan failed: %v", err)
 		return result, err
 	}
-	log.Printf("scan completed duration=%s processed=%d last_key=%q has_more=%t", time.Since(start), result.Processed, result.LastKey, result.HasMore)
+	logger.Info("scan completed duration=%s processed=%d last_key=%q has_more=%t", time.Since(start), result.Processed, result.LastKey, result.HasMore)
 	return result, nil
 }
 

@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/xiaolutech/s3-image-optimizer/internal/imageopt"
+	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
 	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
 )
 
@@ -63,6 +63,7 @@ type Worker struct {
 	cfg         Config
 	cursorMu    sync.Mutex
 	scanLastKey string
+	logger      *slog.Logger
 }
 
 type SkipMarker struct {
@@ -78,8 +79,8 @@ type ScanRoundResult struct {
 	HasMore   bool
 }
 
-func New(store Store, cfg Config) *Worker {
-	return &Worker{store: store, cfg: cfg}
+func New(store Store, cfg Config, logger *slog.Logger) *Worker {
+	return &Worker{store: store, cfg: cfg, logger: logger}
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
@@ -102,7 +103,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			return err
 		}
 
-		log.Printf("scan attempt failed attempt=%d/%d retry_in=%s err=%v", attempt, attempts, delay, err)
+		w.logger.Warn("scan attempt failed attempt=%d/%d retry_in=%s err=%v", attempt, attempts, delay, err)
 		if err := wait(ctx, delay); err != nil {
 			return err
 		}
@@ -187,7 +188,7 @@ func (w *Worker) ProcessObject(ctx context.Context, source storage.ObjectInfo) e
 
 func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (bool, error) {
 	if source.Size < w.cfg.MinBytes {
-		log.Printf("skip small object key=%s size=%d", source.Key, source.Size)
+		w.logger.Debug("skip small object key=%s size=%d", source.Key, source.Size)
 		return true, nil
 	}
 
@@ -204,7 +205,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	}
 	optimizedFound := err == nil
 	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
-		log.Printf("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
+		w.logger.Debug("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
 		return false, nil
 	}
 
@@ -218,7 +219,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		return false, fmt.Errorf("head skip marker %s: %w", source.Key, err)
 	}
 	if err == nil && isCurrentOptimized(skipMarker, source, w.cfg.OptimizationProfile) {
-		log.Printf("skip current skip marker key=%s", source.Key)
+		w.logger.Debug("skip current skip marker key=%s", source.Key)
 		return false, nil
 	}
 
@@ -235,7 +236,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		source = *sourceInfo
 	}
 	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
-		log.Printf("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
+		w.logger.Debug("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
 		return false, nil
 	}
 	if !imageopt.IsSupportedContentType(source.ContentType) {
@@ -292,7 +293,7 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	}); err != nil {
 		return false, fmt.Errorf("put optimized object %s: %w", putKey, err)
 	}
-	log.Printf("optimized object key=%s optimized_key=%s source_etag=%s", source.Key, putKey, source.ETag)
+	w.logger.Info("optimized object key=%s optimized_key=%s source_etag=%s", source.Key, putKey, source.ETag)
 	return true, nil
 }
 
@@ -406,7 +407,7 @@ func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo,
 	if err != nil {
 		return fmt.Errorf("put skip marker %s: %w", key, err)
 	}
-	log.Printf("wrote skip marker key=%s reason=%s", source.Key, reason)
+	w.logger.Debug("wrote skip marker key=%s reason=%s", source.Key, reason)
 	return nil
 }
 

@@ -82,6 +82,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.RunOnce {
 		t.Fatal("expected RunOnce false by default")
 	}
+	if cfg.LogLevel != "info" {
+		t.Fatalf("expected log level info, got %q", cfg.LogLevel)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -113,6 +116,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("SCAN_RETRY_INITIAL_DELAY", "2s")
 	t.Setenv("SCAN_RETRY_MAX_DELAY", "30s")
 	t.Setenv("RUN_ONCE", "true")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cfg, err := Load()
 	if err != nil {
@@ -175,6 +179,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if !cfg.RunOnce {
 		t.Fatal("expected RunOnce true")
+	}
+	if cfg.LogLevel != "debug" {
+		t.Fatalf("expected log level debug, got %q", cfg.LogLevel)
 	}
 }
 
@@ -319,6 +326,11 @@ func TestValidateRequiresCoreFields(t *testing.T) {
 			mutate:    func(cfg *Config) { cfg.ScanRetryInitialDelay = time.Minute; cfg.ScanRetryMaxDelay = time.Second },
 			wantError: "SCAN_RETRY_INITIAL_DELAY",
 		},
+		{
+			name:      "invalid log level",
+			mutate:    func(cfg *Config) { cfg.LogLevel = "verbose" },
+			wantError: "LOG_LEVEL",
+		},
 	}
 
 	for _, tt := range tests {
@@ -362,6 +374,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid retry initial delay", key: "SCAN_RETRY_INITIAL_DELAY", val: "soon"},
 		{name: "invalid retry max delay", key: "SCAN_RETRY_MAX_DELAY", val: "soon"},
 		{name: "invalid run once", key: "RUN_ONCE", val: "sometimes"},
+		{name: "invalid log level", key: "LOG_LEVEL", val: "verbose"},
 	}
 
 	for _, tt := range tests {
@@ -430,6 +443,7 @@ func clearEnv(t *testing.T) {
 		"SCAN_RETRY_INITIAL_DELAY",
 		"SCAN_RETRY_MAX_DELAY",
 		"RUN_ONCE",
+		"LOG_LEVEL",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("unset %s: %v", key, err)

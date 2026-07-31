@@ -40,6 +40,8 @@ type Config struct {
 	ScanRetryAttempts     int
 	ScanRetryInitialDelay time.Duration
 	ScanRetryMaxDelay     time.Duration
+
+	LogLevel string
 }
 
 func DefaultConfig() *Config {
@@ -65,6 +67,7 @@ func DefaultConfig() *Config {
 		ScanRetryAttempts:     8,
 		ScanRetryInitialDelay: 5 * time.Second,
 		ScanRetryMaxDelay:     2 * time.Minute,
+		LogLevel:              "info",
 	}
 }
 
@@ -137,6 +140,7 @@ func Load() (*Config, error) {
 	if cfg.RunOnce, err = getenvBool("RUN_ONCE", cfg.RunOnce); err != nil {
 		return nil, err
 	}
+	cfg.LogLevel = getenv("LOG_LEVEL", cfg.LogLevel)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -215,6 +219,12 @@ func (c *Config) Validate() error {
 	}
 	if c.ScanRetryMaxDelay > 0 && c.ScanRetryInitialDelay > c.ScanRetryMaxDelay {
 		return fmt.Errorf("SCAN_RETRY_INITIAL_DELAY cannot exceed SCAN_RETRY_MAX_DELAY")
+	}
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+		// valid
+	default:
+		return fmt.Errorf("LOG_LEVEL must be one of: debug, info, warn, error")
 	}
 	return nil
 }

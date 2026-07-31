@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	slog "github.com/xiaolutech/s3-image-optimizer/internal/log"
 	"github.com/xiaolutech/s3-image-optimizer/internal/storage"
 )
 
@@ -26,7 +27,7 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 	}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: largeJPEG(t)}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
 		},
 	}}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: body}
 
 	cfg := testAVIFWorkerConfig()
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestWorkerSkipsCurrentAVIFOptimizedObject(t *testing.T) {
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestWorkerRewritesStaleAVIFOptimizedObject(t *testing.T) {
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -253,7 +254,7 @@ func TestWorkerRewritesAVIFProfileMismatchAtMirroredKey(t *testing.T) {
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -287,7 +288,7 @@ func TestWorkerRewritesAVIFOptimizedObjectMissingRequiredMetadata(t *testing.T) 
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -322,7 +323,7 @@ func TestWorkerRewritesAVIFOptimizedObjectWithWrongContentType(t *testing.T) {
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -356,7 +357,7 @@ func TestWorkerRewritesStaleOptimizedObject(t *testing.T) {
 		},
 	}}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -390,7 +391,7 @@ func TestWorkerRewritesOldOptimizationProfile(t *testing.T) {
 		},
 	}}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -408,7 +409,7 @@ func TestWorkerSkipsSmallSourceWithoutRead(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "small.jpg", Size: 10, ETag: "small-etag", ContentType: "image/jpeg"}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
 	source := storage.ObjectInfo{Key: "notes/anim.gif", Size: 1024, ETag: "gif-etag", ContentType: "image/gif"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: []byte("gif")}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -453,7 +454,7 @@ func TestWorkerWritesSkipMarkerForUndecodableSupportedSource(t *testing.T) {
 	}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: []byte("not actually a jpeg")}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -483,7 +484,7 @@ func TestWorkerRunScanRoundWritesSkipMarkerForWebPUnsupportedDimensions(t *testi
 
 	cfg := testWorkerConfig()
 	cfg.MinBytes = 0
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 
 	result, err := w.RunScanRound(context.Background())
 	if err != nil {
@@ -528,7 +529,7 @@ func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
 		},
 	}}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -562,7 +563,7 @@ func TestWorkerSkipsCurrentSkipMarkerWithoutSourceHeadWhenAVIFEnabled(t *testing
 		},
 	}}
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -588,7 +589,7 @@ func TestWorkerWritesUnsupportedSkipMarkerFromSourceHeadWithoutReadingBody(t *te
 		ContentType: "video/webm",
 	}, body: []byte("large video")}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.ProcessObject(context.Background(), source); err != nil {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
@@ -608,7 +609,7 @@ func TestWorkerRunOnceListsSourceBucket(t *testing.T) {
 	store.objects[objKey("source", "b.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "b.jpg", Size: int64(len(body)), ETag: "b", ContentType: "image/jpeg"}, body: body}
 	store.objects[objKey("source", "a.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "a.jpg", Size: int64(len(body)), ETag: "a", ContentType: "image/jpeg"}, body: body}
 
-	w := New(store, testWorkerConfig())
+	w := New(store, testWorkerConfig(), testLogger())
 	if err := w.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce failed: %v", err)
 	}
@@ -636,7 +637,7 @@ func TestWorkerRunOnceRetriesTransientListErrors(t *testing.T) {
 	cfg.ScanRetryInitialDelay = time.Nanosecond
 	cfg.ScanRetryMaxDelay = time.Nanosecond
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	if err := w.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce failed after transient list errors: %v", err)
 	}
@@ -660,7 +661,7 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	cfg.ScanRetryInitialDelay = time.Nanosecond
 	cfg.ScanRetryMaxDelay = time.Nanosecond
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	err := w.RunOnce(context.Background())
 	if err == nil {
 		t.Fatal("expected RunOnce to return process object error")
@@ -687,7 +688,7 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	cfg := testWorkerConfig()
 	cfg.ScanBatchSize = 2
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	first, err := w.RunScanRound(context.Background())
 	if err != nil {
 		t.Fatalf("first RunScanRound failed: %v", err)
@@ -766,7 +767,7 @@ func TestWorkerRunScanRoundCountsCurrentObjectsTowardBatchWindow(t *testing.T) {
 	cfg := testWorkerConfig()
 	cfg.ScanBatchSize = 2
 
-	w := New(store, cfg)
+	w := New(store, cfg, testLogger())
 	result, err := w.RunScanRound(context.Background())
 	if err != nil {
 		t.Fatalf("RunScanRound failed: %v", err)
@@ -970,6 +971,10 @@ func testWorkerConfig() Config {
 		MinBytes:            512,
 		ScanBatchSize:       200,
 	}
+}
+
+func testLogger() *slog.Logger {
+	return slog.New("error")
 }
 
 func testAVIFWorkerConfig() Config {
