@@ -26,15 +26,12 @@ const (
 	avifVariantFormat         = "avif"
 	webpVariantFormat         = "webp"
 
-	headObjectTimeout    = 45 * time.Second
-	getObjectTimeout     = 120 * time.Second
-	putObjectTimeout     = 120 * time.Second
-	skipMarkerPutTimeout = 45 * time.Second
-	manifestTimeout      = 45 * time.Second
+	getObjectTimeout = 120 * time.Second
+	putObjectTimeout = 120 * time.Second
+	manifestTimeout  = 45 * time.Second
 )
 
 type Store interface {
-	HeadObject(ctx context.Context, bucket, key string) (*storage.ObjectInfo, error)
 	GetObject(ctx context.Context, bucket, key string) ([]byte, *storage.ObjectInfo, error)
 	PutObject(ctx context.Context, bucket, key string, body []byte, opts storage.PutOptions) error
 	ListObjects(ctx context.Context, bucket, prefix string, visit func(storage.ObjectInfo) error) error
@@ -53,7 +50,6 @@ type Config struct {
 	AVIFQualityMax        int
 	AVIFSpeed             int
 	MinBytes              int64
-	ProcessDelay          time.Duration
 	ScanBatchSize         int
 	ScanRetryAttempts     int
 	ScanRetryInitialDelay time.Duration
@@ -85,13 +81,6 @@ type ManifestObject struct {
 	Key  string `json:"key"`
 	ETag string `json:"etag"`
 	Size int64  `json:"size"`
-}
-
-type SkipMarker struct {
-	SourceKey  string `json:"source_key"`
-	SourceETag string `json:"source_etag"`
-	Profile    string `json:"profile"`
-	Reason     string `json:"reason"`
 }
 
 type ScanRoundResult struct {
@@ -149,25 +138,23 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 }
 
 func (w *Worker) runOnce(ctx context.Context) error {
-	newManifest := &Manifest{Profile: w.cfg.OptimizationProfile, ConfigSignature: w.configSignature}
-	fingerprint := sha256.New()
-	err := w.store.ListObjects(ctx, w.cfg.SourceBucket, "", func(info storage.ObjectInfo) error {
-		newManifest.Objects = append(newManifest.Objects, ManifestObject{Key: info.Key, ETag: info.ETag, Size: info.Size})
-		writeManifestFingerprint(fingerprint, info)
-		processErr := w.ProcessObject(ctx, info)
-		if processErr != nil {
-			return processObjectError{err: processErr}
+	if err := w.startPass(ctx); err != nil {
+		return err
+	}
+	for len(w.pendingObjects) > 0 {
+		info := w.pendingObjects[0]
+		w.pendingObjects = w.pendingObjects[1:]
+		if _, err := w.processObject(ctx, info); err != nil {
+			return processObjectError{err: err}
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
-	newManifest.Fingerprint = hex.EncodeToString(fingerprint.Sum(nil))
-	if err := w.saveManifest(ctx, newManifest); err != nil {
-		return err
+	if w.manifestDirty {
+		if err := w.saveManifest(ctx, w.passManifest); err != nil {
+			return err
+		}
 	}
-	w.logger.Info("run once completed objects=%d fingerprint=%s", len(newManifest.Objects), newManifest.Fingerprint)
+	w.logger.Info("run once completed objects=%d fingerprint=%s", len(w.passManifest.Objects), w.passManifest.Fingerprint)
+	w.resetPass()
 	return nil
 }
 
@@ -190,6 +177,7 @@ func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
 		w.pendingObjects = w.pendingObjects[1:]
 		counted, err := w.processObject(ctx, info)
 		if err != nil {
+			w.pendingObjects = append([]storage.ObjectInfo{info}, w.pendingObjects...)
 			return result, processObjectError{err: err}
 		}
 		if counted {
@@ -205,15 +193,19 @@ func (w *Worker) RunScanRound(ctx context.Context) (ScanRoundResult, error) {
 				w.logger.Warn("save manifest failed: %v", err)
 			}
 		}
-		w.passStarted = false
-		w.passManifest = nil
-		w.pendingObjects = nil
-		w.manifestDirty = false
+		w.resetPass()
 		return result, nil
 	}
 
 	result.HasMore = true
 	return result, nil
+}
+
+func (w *Worker) resetPass() {
+	w.passStarted = false
+	w.passManifest = nil
+	w.pendingObjects = nil
+	w.manifestDirty = false
 }
 
 func (w *Worker) startPass(ctx context.Context) error {
@@ -258,9 +250,6 @@ func (w *Worker) startPass(ctx context.Context) error {
 }
 
 func (w *Worker) loadManifest(ctx context.Context) (*Manifest, error) {
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return nil, err
-	}
 	getCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 	body, _, err := w.store.GetObject(getCtx, w.cfg.OptimizedBucket, manifestKey(w.cfg.OptimizationProfile))
@@ -278,9 +267,6 @@ func (w *Worker) loadManifest(ctx context.Context) (*Manifest, error) {
 }
 
 func (w *Worker) saveManifest(ctx context.Context, m *Manifest) error {
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
-	}
 	body, err := json.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
@@ -349,62 +335,8 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		return true, nil
 	}
 
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return false, err
-	}
-
-	optimizedKey := optimizedVariantKey(source.Key, w.outputVariantFormat())
-	headCtx, headCancel := context.WithTimeout(ctx, headObjectTimeout)
-	defer headCancel()
-	optimized, err := w.store.HeadObject(headCtx, w.cfg.OptimizedBucket, optimizedKey)
-	if err != nil && !isNotFound(err) {
-		return false, fmt.Errorf("head optimized object %s: %w", optimizedKey, err)
-	}
-	optimizedFound := err == nil
-	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
-		w.logger.Debug("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
-		return false, nil
-	}
-
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return false, err
-	}
-	skipCtx, skipCancel := context.WithTimeout(ctx, headObjectTimeout)
-	defer skipCancel()
-	skipMarker, err := w.store.HeadObject(skipCtx, w.cfg.OptimizedBucket, skipMarkerKey(source.Key))
-	if err != nil && !isNotFound(err) {
-		return false, fmt.Errorf("head skip marker %s: %w", source.Key, err)
-	}
-	if err == nil && isCurrentOptimized(skipMarker, source, w.cfg.OptimizationProfile, w.configSignature) {
-		w.logger.Debug("skip current skip marker key=%s", source.Key)
-		return false, nil
-	}
-
-	if source.ContentType == "" {
-		if err := w.waitForRequestDelay(ctx); err != nil {
-			return false, err
-		}
-		sourceCtx, sourceCancel := context.WithTimeout(ctx, headObjectTimeout)
-		defer sourceCancel()
-		sourceInfo, err := w.store.HeadObject(sourceCtx, w.cfg.SourceBucket, source.Key)
-		if err != nil {
-			return false, fmt.Errorf("head source object %s: %w", source.Key, err)
-		}
-		source = *sourceInfo
-	}
-	if optimizedFound && w.isCurrentOptimizedForSource(optimized, source) {
-		w.logger.Debug("skip current optimized object key=%s optimized_key=%s", source.Key, optimizedKey)
-		return false, nil
-	}
-	if !imageopt.IsSupportedContentType(source.ContentType) {
-		return true, w.writeSkipMarker(ctx, source, "unsupported_content_type")
-	}
-
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return false, err
-	}
-	getCtx, getCancel := context.WithTimeout(ctx, getObjectTimeout)
-	defer getCancel()
+	getCtx, cancel := context.WithTimeout(ctx, getObjectTimeout)
+	defer cancel()
 	body, sourceInfo, err := w.store.GetObject(getCtx, w.cfg.SourceBucket, source.Key)
 	if err != nil {
 		return false, fmt.Errorf("get source object %s: %w", source.Key, err)
@@ -428,12 +360,10 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 		return false, fmt.Errorf("optimize %s: %w", source.Key, err)
 	}
 	if result.Skipped {
-		return true, w.writeSkipMarker(ctx, source, result.Reason)
+		w.logger.Debug("skip object key=%s reason=%s", source.Key, result.Reason)
+		return true, nil
 	}
 
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return false, err
-	}
 	putCtx, putCancel := context.WithTimeout(ctx, putObjectTimeout)
 	defer putCancel()
 	metadata := map[string]string{
@@ -453,10 +383,6 @@ func (w *Worker) processObject(ctx context.Context, source storage.ObjectInfo) (
 	}
 	w.logger.Info("optimized object key=%s optimized_key=%s source_etag=%s", source.Key, putKey, source.ETag)
 	return true, nil
-}
-
-func (w *Worker) waitForRequestDelay(ctx context.Context) error {
-	return wait(ctx, w.cfg.ProcessDelay)
 }
 
 func (w *Worker) nextRetryDelay(delay time.Duration) time.Duration {
@@ -494,31 +420,6 @@ func wait(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func isCurrentOptimized(optimized *storage.ObjectInfo, source storage.ObjectInfo, profile, configSignature string) bool {
-	if optimized == nil {
-		return false
-	}
-	if optimized.Metadata[sourceETagMetadata] != source.ETag ||
-		optimized.Metadata[profileMetadata] != profile {
-		return false
-	}
-	storedSignature := optimized.Metadata[configSignatureMetadata]
-	if storedSignature == "" {
-		return true // legacy object written before config-signature tracking
-	}
-	return storedSignature == configSignature
-}
-
-func (w *Worker) isCurrentOptimizedForSource(optimized *storage.ObjectInfo, source storage.ObjectInfo) bool {
-	if !isCurrentOptimized(optimized, source, w.cfg.OptimizationProfile, w.configSignature) {
-		return false
-	}
-	return optimized.ContentType == w.outputContentType() &&
-		optimized.Metadata[sourceKeyMetadata] == source.Key &&
-		optimized.Metadata[sourceContentTypeMetadata] == source.ContentType &&
-		optimized.Metadata[variantFormatMetadata] == w.outputVariantFormat()
-}
-
 func (w *Worker) outputVariantFormat() string {
 	if w.cfg.AVIFEnabled {
 		return avifVariantFormat
@@ -531,43 +432,6 @@ func (w *Worker) outputContentType() string {
 		return imageopt.ContentTypeAVIF
 	}
 	return imageopt.ContentTypeWEBP
-}
-
-func (w *Worker) writeSkipMarker(ctx context.Context, source storage.ObjectInfo, reason string) error {
-	marker := SkipMarker{
-		SourceKey:  source.Key,
-		SourceETag: source.ETag,
-		Profile:    w.cfg.OptimizationProfile,
-		Reason:     reason,
-	}
-	body, err := json.Marshal(marker)
-	if err != nil {
-		return fmt.Errorf("marshal skip marker: %w", err)
-	}
-	key := skipMarkerKey(source.Key)
-	if err := w.waitForRequestDelay(ctx); err != nil {
-		return err
-	}
-	markerCtx, markerCancel := context.WithTimeout(ctx, skipMarkerPutTimeout)
-	defer markerCancel()
-	err = w.store.PutObject(markerCtx, w.cfg.OptimizedBucket, key, body, storage.PutOptions{
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			sourceETagMetadata:      source.ETag,
-			profileMetadata:         w.cfg.OptimizationProfile,
-			configSignatureMetadata: w.configSignature,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("put skip marker %s: %w", key, err)
-	}
-	w.logger.Debug("wrote skip marker key=%s reason=%s", source.Key, reason)
-	return nil
-}
-
-func skipMarkerKey(sourceKey string) string {
-	sum := sha256.Sum256([]byte(sourceKey))
-	return ".s3-image-sidecar/skips/" + hex.EncodeToString(sum[:]) + ".json"
 }
 
 func manifestKey(profile string) string {

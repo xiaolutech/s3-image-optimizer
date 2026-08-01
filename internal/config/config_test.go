@@ -64,9 +64,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ScanEnabled {
 		t.Fatal("expected scan enabled false by default")
 	}
-	if cfg.ProcessDelay != 0 {
-		t.Fatalf("expected process delay 0, got %v", cfg.ProcessDelay)
-	}
 	if cfg.ScanBatchSize != 200 {
 		t.Fatalf("expected scan batch size 200, got %d", cfg.ScanBatchSize)
 	}
@@ -110,7 +107,6 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("SCAN_INTERVAL", "5m")
 	t.Setenv("SCAN_FULL_PASS_INTERVAL", "12h")
 	t.Setenv("SCAN_ENABLED", "true")
-	t.Setenv("PROCESS_DELAY", "5s")
 	t.Setenv("SCAN_BATCH_SIZE", "25")
 	t.Setenv("SCAN_RETRY_ATTEMPTS", "4")
 	t.Setenv("SCAN_RETRY_INITIAL_DELAY", "2s")
@@ -161,9 +157,6 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if !cfg.ScanEnabled {
 		t.Fatal("expected scan enabled true")
-	}
-	if cfg.ProcessDelay != 5*time.Second {
-		t.Fatalf("expected process delay 5s, got %v", cfg.ProcessDelay)
 	}
 	if cfg.ScanBatchSize != 25 {
 		t.Fatalf("expected scan batch size 25, got %d", cfg.ScanBatchSize)
@@ -368,7 +361,6 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 		{name: "invalid scan interval", key: "SCAN_INTERVAL", val: "soon"},
 		{name: "invalid full-pass scan interval", key: "SCAN_FULL_PASS_INTERVAL", val: "soon"},
 		{name: "invalid scan enabled", key: "SCAN_ENABLED", val: "sometimes"},
-		{name: "invalid process delay", key: "PROCESS_DELAY", val: "soon"},
 		{name: "invalid scan batch size", key: "SCAN_BATCH_SIZE", val: "many"},
 		{name: "invalid retry attempts", key: "SCAN_RETRY_ATTEMPTS", val: "many"},
 		{name: "invalid retry initial delay", key: "SCAN_RETRY_INITIAL_DELAY", val: "soon"},
@@ -437,7 +429,6 @@ func clearEnv(t *testing.T) {
 		"SCAN_INTERVAL",
 		"SCAN_FULL_PASS_INTERVAL",
 		"SCAN_ENABLED",
-		"PROCESS_DELAY",
 		"SCAN_BATCH_SIZE",
 		"SCAN_RETRY_ATTEMPTS",
 		"SCAN_RETRY_INITIAL_DELAY",

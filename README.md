@@ -25,7 +25,7 @@ Every optimized object includes:
 - `x-amz-meta-optimization-profile`
 - `x-amz-meta-source-content-type`
 - `x-amz-meta-variant-format: webp` or `avif`
-- `x-amz-meta-config-signature` (hash of the optimization settings used to produce the object; used for change detection)
+- `x-amz-meta-config-signature` (hash of the optimization settings used to produce the object)
 
 For a source object:
 
@@ -54,7 +54,7 @@ x-amz-meta-config-signature: <hash>
 
 - Stays idle by default when both `SCAN_ENABLED=false` and `RUN_ONCE=false`.
 - Runs bounded resident scan rounds when `SCAN_ENABLED=true`.
-- Runs one full-bucket scan and exits when `RUN_ONCE=true`.
+- Runs one manifest-diff pass and exits when `RUN_ONCE=true`.
 - Each resident scan round starts by listing the source bucket once, building a folder fingerprint (`key + etag + size` over all objects), and comparing it against the saved manifest.
 - When the fingerprint is unchanged, the whole folder is skipped and no object is touched.
 - When it changed, only the added or modified keys are processed across bounded scan rounds; the optimized copies of untouched keys are not re-read.
@@ -67,12 +67,9 @@ x-amz-meta-config-signature: <hash>
 - Encodes supported source images to AVIF when `AVIF_ENABLED=true`.
 - Writes optimized objects to `OPTIMIZED_BUCKET`.
 - Skips objects smaller than `MIN_BYTES`.
-- Skips current optimized objects when metadata already matches.
-- Writes skip markers to `.s3-image-sidecar/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
+- Skips unsupported or insufficiently-compressed images without writing an optimized object.
 
-Because unchanged keys are skipped entirely, an optimized object that is deleted or corrupted without a matching source change will not be repaired by the resident loop. Run once with `RUN_ONCE=true` to force a full re-verification pass and refresh the manifest.
-
-Optimized objects written before `config-signature` tracking are treated as current while their source ETag and profile still match, so upgrading the worker does not re-encode the whole bucket. They pick up `config-signature` the next time they are rewritten.
+Because only changed keys are re-optimized, an optimized object that is deleted or corrupted without a matching source change will not be repaired by either the resident loop or `RUN_ONCE`. To force a full re-encode, change an optimization setting (which bumps the manifest's config signature and re-schedules every object) or delete the manifest at `.s3-image-sidecar/manifest/<profile>.json`.
 
 ## Configuration
 
@@ -95,14 +92,13 @@ Optimized objects written before `config-signature` tracking are treated as curr
 - `AVIF_SPEED` - AVIF encoder speed, 0 through 10; higher is faster with lower compression efficiency. Default: `6`.
 - `MIN_BYTES` - Minimum source object size before optimization. Default: `524288`.
 - `SCAN_ENABLED` - Enable resident bounded scan rounds. Default: `false`.
-- `SCAN_INTERVAL` - Delay between resident scan rounds while a bucket pass still has more objects when `SCAN_ENABLED=true`. Default: `24h`.
+- `SCAN_INTERVAL` - Delay between resident scan rounds while a bucket pass still has more changed objects; sets the pace between batches when `SCAN_ENABLED=true`. Default: `24h`.
 - `SCAN_FULL_PASS_INTERVAL` - Delay after a resident scan round reaches the end of the bucket before starting over from the beginning. Default: `24h`.
-- `SCAN_BATCH_SIZE` - Maximum changed source objects processed per resident scan round. Keys left untouched by a change (current optimized objects and current skip markers) no longer consume this window. This is an object count, not a byte limit. Default: `200`.
-- `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
+- `SCAN_BATCH_SIZE` - Maximum changed source objects processed per resident scan round. Only keys selected by the manifest diff consume this window. This is an object count, not a byte limit. Default: `200`.
 - `SCAN_RETRY_ATTEMPTS` - Whole-scan retry attempts after a failed scan, including the first attempt. Set to `1` to disable scan retries. Default: `8`.
 - `SCAN_RETRY_INITIAL_DELAY` - Initial whole-scan retry delay. Default: `5s`.
 - `SCAN_RETRY_MAX_DELAY` - Maximum whole-scan retry delay after exponential backoff. Default: `2m`.
-- `RUN_ONCE` - Run one full-bucket scan and exit. Default: `false`.
+- `RUN_ONCE` - Run a single manifest-diff pass and exit. Default: `false`.
 
 ## Local Development
 

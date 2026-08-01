@@ -34,7 +34,6 @@ type Config struct {
 	ScanFullPassInterval time.Duration
 	ScanEnabled          bool
 	RunOnce              bool
-	ProcessDelay         time.Duration
 	ScanBatchSize        int
 
 	ScanRetryAttempts     int
@@ -62,7 +61,6 @@ func DefaultConfig() *Config {
 		ScanInterval:          24 * time.Hour,
 		ScanFullPassInterval:  24 * time.Hour,
 		ScanEnabled:           false,
-		ProcessDelay:          0,
 		ScanBatchSize:         200,
 		ScanRetryAttempts:     8,
 		ScanRetryInitialDelay: 5 * time.Second,
@@ -120,9 +118,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.ScanEnabled, err = getenvBool("SCAN_ENABLED", cfg.ScanEnabled); err != nil {
-		return nil, err
-	}
-	if cfg.ProcessDelay, err = getenvDuration("PROCESS_DELAY", cfg.ProcessDelay); err != nil {
 		return nil, err
 	}
 	if cfg.ScanBatchSize, err = getenvInt("SCAN_BATCH_SIZE", cfg.ScanBatchSize); err != nil {
@@ -201,9 +196,6 @@ func (c *Config) Validate() error {
 	}
 	if c.ScanFullPassInterval <= 0 {
 		return fmt.Errorf("SCAN_FULL_PASS_INTERVAL must be positive")
-	}
-	if c.ProcessDelay < 0 {
-		return fmt.Errorf("PROCESS_DELAY cannot be negative")
 	}
 	if c.ScanBatchSize < 1 {
 		return fmt.Errorf("SCAN_BATCH_SIZE must be at least 1")

@@ -3,7 +3,6 @@ package worker
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
@@ -50,36 +49,6 @@ func TestWorkerProcessesMissingOptimizedObject(t *testing.T) {
 	}
 	if store.getCalls != 1 {
 		t.Fatalf("expected one source get, got %d", store.getCalls)
-	}
-}
-
-func TestWorkerSkipsCurrentOptimizedObject(t *testing.T) {
-	store := newFakeStore()
-	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
-	store.objects[objKey("optimized", "notes/photo.jpg.webp")] = fakeObject{info: storage.ObjectInfo{
-		Key:         "notes/photo.jpg.webp",
-		Size:        100,
-		ETag:        "optimized-etag",
-		ContentType: "image/webp",
-		Metadata: map[string]string{
-			"source-etag":          "source-etag",
-			"optimization-profile": "v6-webp-q82-original",
-			"source-key":           source.Key,
-			"source-content-type":  source.ContentType,
-			"variant-format":       "webp",
-		},
-	}}
-
-	w := New(store, testWorkerConfig(), testLogger())
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source get, got %d", store.getCalls)
-	}
-	if len(store.putKeys) != 0 {
-		t.Fatalf("expected no puts, got %#v", store.putKeys)
 	}
 }
 
@@ -166,37 +135,6 @@ func TestWorkerWritesAVIFOptimizedObjectWhenEnabled(t *testing.T) {
 	}
 	if _, ok := store.objects[objKey("optimized", "notes/photo.jpg.webp")]; ok {
 		t.Fatalf("did not expect webp optimized object when AVIF is enabled")
-	}
-}
-
-func TestWorkerSkipsCurrentAVIFOptimizedObject(t *testing.T) {
-	store := newFakeStore()
-	source := storage.ObjectInfo{Key: "notes/photo.jpg", Size: int64(len(largeJPEG(t))), ETag: "source-etag", ContentType: "image/jpeg"}
-	cfg := testAVIFWorkerConfig()
-	key := optimizedVariantKey(source.Key, avifVariantFormat)
-	store.objects[objKey("optimized", key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         key,
-		Size:        100,
-		ETag:        "optimized-etag",
-		ContentType: "image/avif",
-		Metadata: map[string]string{
-			"source-key":           source.Key,
-			"source-etag":          source.ETag,
-			"optimization-profile": cfg.OptimizationProfile,
-			"source-content-type":  source.ContentType,
-			"variant-format":       "avif",
-		},
-	}}
-
-	w := New(store, cfg, testLogger())
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source get, got %d", store.getCalls)
-	}
-	if len(store.putKeys) != 0 {
-		t.Fatalf("expected no puts, got %#v", store.putKeys)
 	}
 }
 
@@ -424,7 +362,7 @@ func TestWorkerSkipsSmallSourceWithoutRead(t *testing.T) {
 	}
 }
 
-func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
+func TestWorkerSkipsUnsupportedSourceWithoutWritingOptimized(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{Key: "notes/anim.gif", Size: 1024, ETag: "gif-etag", ContentType: "image/gif"}
 	store.objects[objKey("source", source.Key)] = fakeObject{info: source, body: []byte("gif")}
@@ -434,19 +372,15 @@ func TestWorkerWritesSkipMarkerForUnsupportedSource(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
-	if marker.SourceKey != source.Key {
-		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
+	if store.getCalls != 1 {
+		t.Fatalf("expected one source get, got %d", store.getCalls)
 	}
-	if marker.SourceETag != "gif-etag" {
-		t.Fatalf("expected source etag gif-etag, got %q", marker.SourceETag)
-	}
-	if marker.Reason != "unsupported_content_type" {
-		t.Fatalf("expected unsupported_content_type, got %q", marker.Reason)
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no writes for unsupported source, got %#v", store.putKeys)
 	}
 }
 
-func TestWorkerWritesSkipMarkerForUndecodableSupportedSource(t *testing.T) {
+func TestWorkerSkipsUndecodableSourceWithoutWritingOptimized(t *testing.T) {
 	store := newFakeStore()
 	source := storage.ObjectInfo{
 		Key:         "notes/bad.jpg",
@@ -461,19 +395,12 @@ func TestWorkerWritesSkipMarkerForUndecodableSupportedSource(t *testing.T) {
 		t.Fatalf("ProcessObject failed: %v", err)
 	}
 
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
-	if marker.SourceKey != source.Key {
-		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
-	}
-	if marker.SourceETag != "bad-jpeg-etag" {
-		t.Fatalf("expected source etag bad-jpeg-etag, got %q", marker.SourceETag)
-	}
-	if marker.Reason != "decode_image_failed" {
-		t.Fatalf("expected decode_image_failed, got %q", marker.Reason)
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no writes for undecodable source, got %#v", store.putKeys)
 	}
 }
 
-func TestWorkerRunScanRoundWritesSkipMarkerForWebPUnsupportedDimensions(t *testing.T) {
+func TestWorkerRunScanRoundSkipsUnsupportedWebPDimensions(t *testing.T) {
 	store := newFakeStore()
 	body := tallJPEG(t)
 	source := storage.ObjectInfo{
@@ -496,112 +423,8 @@ func TestWorkerRunScanRoundWritesSkipMarkerForWebPUnsupportedDimensions(t *testi
 		t.Fatalf("expected one counted object, got %d", result.Processed)
 	}
 
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
-	if marker.SourceKey != source.Key {
-		t.Fatalf("expected source key %q, got %q", source.Key, marker.SourceKey)
-	}
-	if marker.SourceETag != source.ETag {
-		t.Fatalf("expected source etag %q, got %q", source.ETag, marker.SourceETag)
-	}
-	if marker.Reason != "unsupported_dimensions" {
-		t.Fatalf("expected unsupported_dimensions, got %q", marker.Reason)
-	}
 	if _, ok := store.objects[objKey("optimized", "notes/tall.webp")]; ok {
 		t.Fatal("did not expect optimized WebP object for unsupported dimensions")
-	}
-}
-
-func TestWorkerSkipsCurrentSkipMarkerWithoutReadingSource(t *testing.T) {
-	store := newFakeStore()
-	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
-	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
-		Size:        source.Size,
-		ETag:        source.ETag,
-		ContentType: "video/webm",
-	}, body: []byte("large video")}
-	store.objects[objKey("optimized", skipMarkerKey(source.Key))] = fakeObject{info: storage.ObjectInfo{
-		Key:         skipMarkerKey(source.Key),
-		Size:        100,
-		ETag:        "marker-etag",
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			"source-etag":          source.ETag,
-			"optimization-profile": "v6-webp-q82-original",
-		},
-	}}
-
-	w := New(store, testWorkerConfig(), testLogger())
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source get, got %d", store.getCalls)
-	}
-	if len(store.putKeys) != 0 {
-		t.Fatalf("expected no puts, got %#v", store.putKeys)
-	}
-}
-
-func TestWorkerSkipsCurrentSkipMarkerWithoutSourceHeadWhenAVIFEnabled(t *testing.T) {
-	store := newFakeStore()
-	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
-	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
-		Size:        source.Size,
-		ETag:        source.ETag,
-		ContentType: "video/webm",
-	}, body: []byte("large video")}
-	cfg := testAVIFWorkerConfig()
-	store.objects[objKey("optimized", skipMarkerKey(source.Key))] = fakeObject{info: storage.ObjectInfo{
-		Key:         skipMarkerKey(source.Key),
-		Size:        100,
-		ETag:        "marker-etag",
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			"source-etag":          source.ETag,
-			"optimization-profile": cfg.OptimizationProfile,
-		},
-	}}
-
-	w := New(store, cfg, testLogger())
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source get, got %d", store.getCalls)
-	}
-	if store.sourceHeadCalls != 0 {
-		t.Fatalf("expected no source head, got %d", store.sourceHeadCalls)
-	}
-	if len(store.putKeys) != 0 {
-		t.Fatalf("expected no puts, got %#v", store.putKeys)
-	}
-}
-
-func TestWorkerWritesUnsupportedSkipMarkerFromSourceHeadWithoutReadingBody(t *testing.T) {
-	store := newFakeStore()
-	source := storage.ObjectInfo{Key: "notes/clip.webm", Size: 10 * 1024 * 1024, ETag: "webm-etag"}
-	store.objects[objKey("source", source.Key)] = fakeObject{info: storage.ObjectInfo{
-		Key:         source.Key,
-		Size:        source.Size,
-		ETag:        source.ETag,
-		ContentType: "video/webm",
-	}, body: []byte("large video")}
-
-	w := New(store, testWorkerConfig(), testLogger())
-	if err := w.ProcessObject(context.Background(), source); err != nil {
-		t.Fatalf("ProcessObject failed: %v", err)
-	}
-
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source get, got %d", store.getCalls)
-	}
-	marker := decodeSkipMarker(t, store.objects[objKey("optimized", skipMarkerKey(source.Key))].body)
-	if marker.Reason != "unsupported_content_type" {
-		t.Fatalf("expected unsupported_content_type, got %q", marker.Reason)
 	}
 }
 
@@ -656,7 +479,7 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	store := newFakeStore()
 	body := largeJPEG(t)
 	store.objects[objKey("source", "photo.jpg")] = fakeObject{info: storage.ObjectInfo{Key: "photo.jpg", Size: int64(len(body)), ETag: "photo", ContentType: "image/jpeg"}, body: body}
-	store.headErrors[objKey("optimized", optimizedVariantKey("photo.jpg", webpVariantFormat))] = errors.New("optimized head failed")
+	store.getErrors[objKey("source", "photo.jpg")] = errors.New("source get failed")
 
 	cfg := testWorkerConfig()
 	cfg.ScanRetryAttempts = 3
@@ -668,8 +491,8 @@ func TestWorkerRunOnceDoesNotRetryProcessObjectErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected RunOnce to return process object error")
 	}
-	if !strings.Contains(err.Error(), "optimized head failed") {
-		t.Fatalf("expected optimized head error, got %v", err)
+	if !strings.Contains(err.Error(), "source get failed") {
+		t.Fatalf("expected source get error, got %v", err)
 	}
 	if store.listCalls != 1 {
 		t.Fatalf("expected no retry for process object error, got %d list calls", store.listCalls)
@@ -884,68 +707,6 @@ func TestWorkerRunScanRoundReprocessesAllObjectsOnConfigChange(t *testing.T) {
 	}
 }
 
-func TestWorkerRunScanRoundCountsCurrentObjectsTowardBatchWindow(t *testing.T) {
-	store := newFakeStore()
-	body := largeJPEG(t)
-	for _, key := range []string{"a.jpg", "b.jpg", "c.jpg", "d.jpg"} {
-		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
-			Key:         key,
-			Size:        int64(len(body)),
-			ETag:        key + "-etag",
-			ContentType: "image/jpeg",
-		}, body: body}
-	}
-	store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))] = fakeObject{info: storage.ObjectInfo{
-		Key:         optimizedVariantKey("a.jpg", webpVariantFormat),
-		Size:        100,
-		ETag:        "a.jpg-optimized-etag",
-		ContentType: "image/webp",
-		Metadata: map[string]string{
-			"source-etag":          "a.jpg-etag",
-			"optimization-profile": "v6-webp-q82-original",
-			"source-key":           "a.jpg",
-			"source-content-type":  "image/jpeg",
-			"variant-format":       "webp",
-		},
-	}}
-	store.objects[objKey("optimized", skipMarkerKey("b.jpg"))] = fakeObject{info: storage.ObjectInfo{
-		Key:         skipMarkerKey("b.jpg"),
-		Size:        100,
-		ETag:        "b.jpg-skip-etag",
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			"source-etag":          "b.jpg-etag",
-			"optimization-profile": "v6-webp-q82-original",
-		},
-	}}
-	cfg := testWorkerConfig()
-	cfg.ScanBatchSize = 2
-
-	w := New(store, cfg, testLogger())
-	result, err := w.RunScanRound(context.Background())
-	if err != nil {
-		t.Fatalf("RunScanRound failed: %v", err)
-	}
-	if result.Processed != 0 {
-		t.Fatalf("expected no processed objects, got %d", result.Processed)
-	}
-	if result.LastKey != "b.jpg" {
-		t.Fatalf("expected last key b.jpg, got %q", result.LastKey)
-	}
-	if !result.HasMore {
-		t.Fatal("expected scan round to report more objects")
-	}
-	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; ok {
-		t.Fatal("did not expect c.jpg.webp to be processed in first batch window")
-	}
-	if store.sourceGetCalls != 0 {
-		t.Fatalf("expected no source gets, got %d", store.sourceGetCalls)
-	}
-	if store.listCalls != 1 {
-		t.Fatalf("expected one full list call, got %d", store.listCalls)
-	}
-}
-
 type fakeObject struct {
 	info storage.ObjectInfo
 	body []byte
@@ -955,41 +716,28 @@ type fakeStore struct {
 	objects             map[string]fakeObject
 	getCalls            int
 	sourceGetCalls      int
-	sourceHeadCalls     int
 	listCalls           int
 	putKeys             []string
 	listBucket          string
 	listErrorsRemaining int
 	listErr             error
-	headErrors          map[string]error
+	getErrors           map[string]error
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		objects:    make(map[string]fakeObject),
-		headErrors: make(map[string]error),
+		objects:   make(map[string]fakeObject),
+		getErrors: make(map[string]error),
 	}
-}
-
-func (s *fakeStore) HeadObject(ctx context.Context, bucket, key string) (*storage.ObjectInfo, error) {
-	if bucket == "source" {
-		s.sourceHeadCalls++
-	}
-	if err, ok := s.headErrors[objKey(bucket, key)]; ok {
-		return nil, err
-	}
-	obj, ok := s.objects[objKey(bucket, key)]
-	if !ok {
-		return nil, errNotFound{}
-	}
-	info := obj.info
-	return &info, nil
 }
 
 func (s *fakeStore) GetObject(ctx context.Context, bucket, key string) ([]byte, *storage.ObjectInfo, error) {
 	s.getCalls++
 	if bucket == "source" {
 		s.sourceGetCalls++
+	}
+	if err, ok := s.getErrors[objKey(bucket, key)]; ok {
+		return nil, nil, err
 	}
 	obj, ok := s.objects[objKey(bucket, key)]
 	if !ok {
@@ -1134,16 +882,4 @@ func solidImage(width, height int) image.Image {
 		}
 	}
 	return img
-}
-
-func decodeSkipMarker(t *testing.T, body []byte) SkipMarker {
-	t.Helper()
-	if len(body) == 0 {
-		t.Fatal("expected skip marker body")
-	}
-	var marker SkipMarker
-	if err := json.Unmarshal(body, &marker); err != nil {
-		t.Fatalf("decode skip marker: %v", err)
-	}
-	return marker
 }

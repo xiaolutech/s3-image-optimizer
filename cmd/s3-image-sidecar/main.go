@@ -53,7 +53,6 @@ func main() {
 		AVIFQualityMax:        cfg.AVIFQualityMax,
 		AVIFSpeed:             cfg.AVIFSpeed,
 		MinBytes:              cfg.MinBytes,
-		ProcessDelay:          cfg.ProcessDelay,
 		ScanBatchSize:         cfg.ScanBatchSize,
 		ScanRetryAttempts:     cfg.ScanRetryAttempts,
 		ScanRetryInitialDelay: cfg.ScanRetryInitialDelay,
