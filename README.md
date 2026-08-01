@@ -25,6 +25,7 @@ Every optimized object includes:
 - `x-amz-meta-optimization-profile`
 - `x-amz-meta-source-content-type`
 - `x-amz-meta-variant-format: webp` or `avif`
+- `x-amz-meta-config-signature` (hash of the optimization settings used to produce the object; used for change detection)
 
 For a source object:
 
@@ -44,6 +45,7 @@ x-amz-meta-source-etag: abc123
 x-amz-meta-optimization-profile: v7-webp-q82-w2560
 x-amz-meta-source-content-type: image/jpeg
 x-amz-meta-variant-format: webp
+x-amz-meta-config-signature: <hash>
 ```
 
 `s3-static` uses those metadata values to decide whether the optimized object is safe to serve. If the source ETag changes or the profile changes, `s3-static` falls back to the source object until this worker rewrites the optimized copy.
@@ -53,6 +55,11 @@ x-amz-meta-variant-format: webp
 - Stays idle by default when both `SCAN_ENABLED=false` and `RUN_ONCE=false`.
 - Runs bounded resident scan rounds when `SCAN_ENABLED=true`.
 - Runs one full-bucket scan and exits when `RUN_ONCE=true`.
+- Each resident scan round starts by listing the source bucket once, building a folder fingerprint (`key + etag + size` over all objects), and comparing it against the saved manifest.
+- When the fingerprint is unchanged, the whole folder is skipped and no object is touched.
+- When it changed, only the added or modified keys are processed across bounded scan rounds; the optimized copies of untouched keys are not re-read.
+- When the optimization configuration changed (`MIN_BYTES`, quality, `MAX_WIDTH`, AVIF settings, or profile), every object is re-scheduled so affected outputs are regenerated without bumping the profile.
+- Saves the current manifest to `.s3-image-sidecar/manifest/<profile>.json` in `OPTIMIZED_BUCKET` at the end of each pass so change detection survives restarts.
 - Supports JPEG and PNG source objects.
 - Resizes images wider than 2560 pixels by default.
 - Resizes images wider than `MAX_WIDTH` only when `MAX_WIDTH` is greater than `0`.
@@ -62,6 +69,10 @@ x-amz-meta-variant-format: webp
 - Skips objects smaller than `MIN_BYTES`.
 - Skips current optimized objects when metadata already matches.
 - Writes skip markers to `.s3-image-sidecar/skips/<sha256-source-key>.json` for unsupported images or insufficient savings.
+
+Because unchanged keys are skipped entirely, an optimized object that is deleted or corrupted without a matching source change will not be repaired by the resident loop. Run once with `RUN_ONCE=true` to force a full re-verification pass and refresh the manifest.
+
+Optimized objects written before `config-signature` tracking are treated as current while their source ETag and profile still match, so upgrading the worker does not re-encode the whole bucket. They pick up `config-signature` the next time they are rewritten.
 
 ## Configuration
 
@@ -86,7 +97,7 @@ x-amz-meta-variant-format: webp
 - `SCAN_ENABLED` - Enable resident bounded scan rounds. Default: `false`.
 - `SCAN_INTERVAL` - Delay between resident scan rounds while a bucket pass still has more objects when `SCAN_ENABLED=true`. Default: `24h`.
 - `SCAN_FULL_PASS_INTERVAL` - Delay after a resident scan round reaches the end of the bucket before starting over from the beginning. Default: `24h`.
-- `SCAN_BATCH_SIZE` - Maximum source objects inspected per resident scan round. Current optimized objects and current skip markers still consume this scan window and advance the cursor. This is an object count, not a byte limit. Default: `200`.
+- `SCAN_BATCH_SIZE` - Maximum changed source objects processed per resident scan round. Keys left untouched by a change (current optimized objects and current skip markers) no longer consume this window. This is an object count, not a byte limit. Default: `200`.
 - `PROCESS_DELAY` - Delay before each S3 request (`HeadObject`, `GetObject`, `PutObject`, skip-marker writes) to reduce MinIO pressure. Default: `0`.
 - `SCAN_RETRY_ATTEMPTS` - Whole-scan retry attempts after a failed scan, including the first attempt. Set to `1` to disable scan retries. Default: `8`.
 - `SCAN_RETRY_INITIAL_DELAY` - Initial whole-scan retry delay. Default: `5s`.

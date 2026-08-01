@@ -101,6 +101,7 @@ func TestOptimizedObjectContractVector(t *testing.T) {
 		"optimization-profile",
 		"source-content-type",
 		"variant-format",
+		"config-signature",
 	}
 	actualMetadataKeys := []string{
 		sourceKeyMetadata,
@@ -108,6 +109,7 @@ func TestOptimizedObjectContractVector(t *testing.T) {
 		profileMetadata,
 		sourceContentTypeMetadata,
 		variantFormatMetadata,
+		configSignatureMetadata,
 	}
 	for i := range expectedMetadataKeys {
 		if actualMetadataKeys[i] != expectedMetadataKeys[i] {
@@ -722,11 +724,163 @@ func TestWorkerRunScanRoundProcessesBatchAndAdvancesInMemoryCursor(t *testing.T)
 	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; !ok {
 		t.Fatal("expected c.jpg.webp optimized object")
 	}
-	if store.listStartAfterCalls[0] != "" {
-		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
+	if store.listCalls != 1 {
+		t.Fatalf("expected one full list per pass, got %d", store.listCalls)
 	}
-	if store.listStartAfterCalls[1] != "b.jpg" {
-		t.Fatalf("expected second list to start after b.jpg, got %q", store.listStartAfterCalls[1])
+	if _, ok := store.objects[objKey("optimized", manifestKey(cfg.OptimizationProfile))]; !ok {
+		t.Fatal("expected pass manifest to be saved")
+	}
+}
+
+func TestWorkerRunScanRoundSkipsUnchangedPass(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	for _, key := range []string{"a.jpg", "b.jpg"} {
+		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
+			Key:         key,
+			Size:        int64(len(body)),
+			ETag:        key + "-etag",
+			ContentType: "image/jpeg",
+		}, body: body}
+	}
+	cfg := testWorkerConfig()
+
+	w := New(store, cfg, testLogger())
+
+	first, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("first RunScanRound failed: %v", err)
+	}
+	if first.HasMore {
+		t.Fatal("expected first scan round to complete the pass")
+	}
+	if first.Processed != 2 {
+		t.Fatalf("expected two processed objects, got %d", first.Processed)
+	}
+	if _, ok := store.objects[objKey("optimized", manifestKey(cfg.OptimizationProfile))]; !ok {
+		t.Fatal("expected pass manifest to be saved")
+	}
+
+	store.sourceGetCalls = 0
+	store.getCalls = 0
+	store.putKeys = nil
+	second, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("second RunScanRound failed: %v", err)
+	}
+	if second.HasMore {
+		t.Fatal("expected unchanged pass to report no more work")
+	}
+	if second.Processed != 0 {
+		t.Fatalf("expected zero processed objects for unchanged pass, got %d", second.Processed)
+	}
+	if store.getCalls != 1 {
+		t.Fatalf("expected only manifest read for unchanged pass, got %d gets", store.getCalls)
+	}
+	if store.sourceGetCalls != 0 {
+		t.Fatalf("expected no source reads for unchanged pass, got %d", store.sourceGetCalls)
+	}
+	if len(store.putKeys) != 0 {
+		t.Fatalf("expected no writes for unchanged pass, got %#v", store.putKeys)
+	}
+}
+
+func TestWorkerRunScanRoundProcessesOnlyChangedKeys(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	for _, key := range []string{"a.jpg", "b.jpg"} {
+		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
+			Key:         key,
+			Size:        int64(len(body)),
+			ETag:        key + "-etag",
+			ContentType: "image/jpeg",
+		}, body: body}
+	}
+	cfg := testWorkerConfig()
+
+	w := New(store, cfg, testLogger())
+	if _, err := w.RunScanRound(context.Background()); err != nil {
+		t.Fatalf("first RunScanRound failed: %v", err)
+	}
+
+	store.putKeys = nil
+	store.sourceGetCalls = 0
+	bSource := store.objects[objKey("source", "b.jpg")]
+	bSource.info.ETag = "b-etag-v2"
+	store.objects[objKey("source", "b.jpg")] = bSource
+	store.objects[objKey("source", "c.jpg")] = fakeObject{info: storage.ObjectInfo{
+		Key:         "c.jpg",
+		Size:        int64(len(body)),
+		ETag:        "c-etag",
+		ContentType: "image/jpeg",
+	}, body: body}
+
+	result, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("second RunScanRound failed: %v", err)
+	}
+	if result.HasMore {
+		t.Fatal("expected second round to complete the pass")
+	}
+	if result.Processed != 2 {
+		t.Fatalf("expected two changed objects processed, got %d", result.Processed)
+	}
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected a.jpg optimized object to be preserved")
+	}
+	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; !ok {
+		t.Fatal("expected c.jpg.webp optimized object for added key")
+	}
+	if _, ok := store.objects[objKey("optimized", manifestKey(cfg.OptimizationProfile))]; !ok {
+		t.Fatal("expected updated manifest to be saved")
+	}
+	if store.sourceGetCalls != 2 {
+		t.Fatalf("expected source reads only for changed keys, got %d", store.sourceGetCalls)
+	}
+}
+
+func TestWorkerRunScanRoundReprocessesAllObjectsOnConfigChange(t *testing.T) {
+	store := newFakeStore()
+	body := largeJPEG(t)
+	for _, key := range []string{"a.jpg", "b.jpg"} {
+		store.objects[objKey("source", key)] = fakeObject{info: storage.ObjectInfo{
+			Key:         key,
+			Size:        int64(len(body)),
+			ETag:        key + "-etag",
+			ContentType: "image/jpeg",
+		}, body: body}
+	}
+
+	cfg := testWorkerConfig()
+	w := New(store, cfg, testLogger())
+	first, err := w.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("first RunScanRound failed: %v", err)
+	}
+	if first.Processed != 2 {
+		t.Fatalf("expected two processed objects, got %d", first.Processed)
+	}
+
+	store.sourceGetCalls = 0
+	cfg2 := testWorkerConfig()
+	cfg2.JPEGQuality = 60
+	w2 := New(store, cfg2, testLogger())
+	result, err := w2.RunScanRound(context.Background())
+	if err != nil {
+		t.Fatalf("second RunScanRound failed: %v", err)
+	}
+	if result.HasMore {
+		t.Fatal("expected second round to complete the pass")
+	}
+	if result.Processed != 2 {
+		t.Fatalf("expected all objects reprocessed after config change, got %d", result.Processed)
+	}
+	if store.sourceGetCalls != 2 {
+		t.Fatalf("expected both sources re-read after config change, got %d", store.sourceGetCalls)
+	}
+	written := store.objects[objKey("optimized", optimizedVariantKey("a.jpg", webpVariantFormat))]
+	if written.info.Metadata[configSignatureMetadata] != cfg2.Signature() {
+		t.Fatalf("expected rewritten object to carry new config signature, got %#v", written.info.Metadata)
 	}
 }
 
@@ -784,14 +938,11 @@ func TestWorkerRunScanRoundCountsCurrentObjectsTowardBatchWindow(t *testing.T) {
 	if _, ok := store.objects[objKey("optimized", optimizedVariantKey("c.jpg", webpVariantFormat))]; ok {
 		t.Fatal("did not expect c.jpg.webp to be processed in first batch window")
 	}
-	if store.getCalls != 0 {
-		t.Fatalf("expected no source gets, got %d", store.getCalls)
+	if store.sourceGetCalls != 0 {
+		t.Fatalf("expected no source gets, got %d", store.sourceGetCalls)
 	}
-	if len(store.listStartAfterCalls) != 1 {
-		t.Fatalf("expected one paged list call, got %d", len(store.listStartAfterCalls))
-	}
-	if store.listStartAfterCalls[0] != "" {
-		t.Fatalf("expected first list to start at bucket beginning, got %q", store.listStartAfterCalls[0])
+	if store.listCalls != 1 {
+		t.Fatalf("expected one full list call, got %d", store.listCalls)
 	}
 }
 
@@ -803,6 +954,7 @@ type fakeObject struct {
 type fakeStore struct {
 	objects             map[string]fakeObject
 	getCalls            int
+	sourceGetCalls      int
 	sourceHeadCalls     int
 	listCalls           int
 	putKeys             []string
@@ -810,7 +962,6 @@ type fakeStore struct {
 	listErrorsRemaining int
 	listErr             error
 	headErrors          map[string]error
-	listStartAfterCalls []string
 }
 
 func newFakeStore() *fakeStore {
@@ -837,6 +988,9 @@ func (s *fakeStore) HeadObject(ctx context.Context, bucket, key string) (*storag
 
 func (s *fakeStore) GetObject(ctx context.Context, bucket, key string) ([]byte, *storage.ObjectInfo, error) {
 	s.getCalls++
+	if bucket == "source" {
+		s.sourceGetCalls++
+	}
 	obj, ok := s.objects[objKey(bucket, key)]
 	if !ok {
 		return nil, nil, errNotFound{}
@@ -885,58 +1039,6 @@ func (s *fakeStore) ListObjects(ctx context.Context, bucket, prefix string, visi
 		}
 	}
 	return nil
-}
-
-func (s *fakeStore) ListObjectsPage(ctx context.Context, bucket, prefix, startAfter string, maxKeys int32) (storage.ListPage, error) {
-	s.listCalls++
-	s.listBucket = bucket
-	s.listStartAfterCalls = append(s.listStartAfterCalls, startAfter)
-	if s.listErrorsRemaining > 0 {
-		s.listErrorsRemaining--
-		return storage.ListPage{}, s.listErr
-	}
-	var keys []string
-	for fullKey, obj := range s.objects {
-		if !strings.HasPrefix(fullKey, bucket+"/") {
-			continue
-		}
-		if !strings.HasPrefix(obj.info.Key, prefix) {
-			continue
-		}
-		if startAfter != "" && obj.info.Key <= startAfter {
-			continue
-		}
-		keys = append(keys, obj.info.Key)
-	}
-	sort.Strings(keys)
-	if maxKeys > 0 && len(keys) > int(maxKeys) {
-		keys = keys[:maxKeys]
-	}
-	objects := make([]storage.ObjectInfo, 0, len(keys))
-	for _, key := range keys {
-		objects = append(objects, s.objects[objKey(bucket, key)].info)
-	}
-	return storage.ListPage{
-		Objects: objects,
-		HasMore: maxKeys > 0 &&
-			len(keys) == int(maxKeys) &&
-			s.hasKeyAfter(bucket, prefix, keys[len(keys)-1]),
-	}, nil
-}
-
-func (s *fakeStore) hasKeyAfter(bucket, prefix, key string) bool {
-	for fullKey, obj := range s.objects {
-		if !strings.HasPrefix(fullKey, bucket+"/") {
-			continue
-		}
-		if !strings.HasPrefix(obj.info.Key, prefix) {
-			continue
-		}
-		if obj.info.Key > key {
-			return true
-		}
-	}
-	return false
 }
 
 type errNotFound struct{}
